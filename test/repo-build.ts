@@ -1,3 +1,5 @@
+import { isObjectRecord } from "../scripts/lib/object-record.ts";
+import { toolchainEnv } from "../scripts/lib/toolchain-env.ts";
 import { spawnSync } from "node:child_process";
 import { randomBytes } from "node:crypto";
 import {
@@ -16,8 +18,6 @@ import path from "node:path";
 import { performance } from "node:perf_hooks";
 import process from "node:process";
 import { fileURLToPath } from "node:url";
-import { isObjectRecord } from "../scripts/lib/object-record.ts";
-import { toolchainEnv } from "../scripts/lib/toolchain-env.ts";
 
 type BuildRunner = (packagePath: string) => void;
 type DistReader<Result> = () => Result;

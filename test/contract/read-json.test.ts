@@ -1,10 +1,10 @@
+import { createJsonReader } from "../../scripts/lib/read-json.ts";
+import { WorkerReleaseInputError } from "../../scripts/worker-release-inputs.ts";
 import assert from "node:assert/strict";
 import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import test from "node:test";
-import { createJsonReader } from "../../scripts/lib/read-json.ts";
-import { WorkerReleaseInputError } from "../../scripts/worker-release-inputs.ts";
 
 test("shared JSON reader preserves parsed values and caller failures", () => {
 	const root = mkdtempSync(path.join(tmpdir(), "ceal-read-json-"));

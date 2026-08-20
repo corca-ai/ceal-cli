@@ -1,4 +1,19 @@
-import { performance } from "node:perf_hooks";
+import packageJson from "../package.json" with { type: "json" };
+import type { CealCliIo, CealCommandContext, CealSessionCapability } from "./cli-runtime.js";
+import { generateCealDeviceProofKeyPair, signCealDeviceProof } from "./device-proof.js";
+import { generateCealHpkeKeyPair, openCealHpkeMessage } from "./hpke.js";
+import { parseNamedOptions } from "./named-options.js";
+import { writeYaml } from "./output.js";
+import type { CealStoredSession } from "./profile-store.js";
+import {
+	type CealRevokeDisposition,
+	endedPreviousSessionAction,
+	sessionCommitRecoveryAction,
+	sessionIdentityConflictFields,
+	sessionReplacementFields,
+	sessionReplacementNextAction,
+} from "./session-replacement.js";
+import { withCealTiming } from "./timing.js";
 import { CealDeviceAdoptionClientError, createCealDeviceAdoptionClient } from "@corca-ai/ceal";
 import {
 	assertCealDeviceEnrollmentDeliveryExpectation,
@@ -18,22 +33,7 @@ import {
 	deviceEnrollmentProofPayload,
 	deviceEnrollmentPublicKeyFingerprint,
 } from "@corca-ai/ceal-protocol";
-import packageJson from "../package.json" with { type: "json" };
-import type { CealCliIo, CealCommandContext, CealSessionCapability } from "./cli-runtime.js";
-import { generateCealDeviceProofKeyPair, signCealDeviceProof } from "./device-proof.js";
-import { generateCealHpkeKeyPair, openCealHpkeMessage } from "./hpke.js";
-import { parseNamedOptions } from "./named-options.js";
-import { writeYaml } from "./output.js";
-import type { CealStoredSession } from "./profile-store.js";
-import {
-	type CealRevokeDisposition,
-	endedPreviousSessionAction,
-	sessionCommitRecoveryAction,
-	sessionIdentityConflictFields,
-	sessionReplacementFields,
-	sessionReplacementNextAction,
-} from "./session-replacement.js";
-import { withCealTiming } from "./timing.js";
+import { performance } from "node:perf_hooks";
 
 // `ceal session adopt`: the employee-facing verified-email device flow.
 //

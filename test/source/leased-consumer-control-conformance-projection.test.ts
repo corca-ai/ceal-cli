@@ -1,9 +1,3 @@
-import assert from "node:assert/strict";
-import { createHash } from "node:crypto";
-import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
-import { tmpdir } from "node:os";
-import path from "node:path";
-import test from "node:test";
 import {
 	decodeCealLeasedConsumerDispositionControlRequest,
 	decodeCealLeasedConsumerDispositionControlResponse,
@@ -15,6 +9,12 @@ import {
 	projectVerifiedControlConformanceRoutes,
 	readControlSessionContract,
 } from "../../scripts/generate-leased-consumer-handoff-runtime.ts";
+import assert from "node:assert/strict";
+import { createHash } from "node:crypto";
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import path from "node:path";
+import test from "node:test";
 
 const ROOT = path.resolve(import.meta.dirname, "../..");
 

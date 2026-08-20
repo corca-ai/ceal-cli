@@ -1,11 +1,3 @@
-import assert from "node:assert/strict";
-import { execFileSync } from "node:child_process";
-import { createHash } from "node:crypto";
-import { cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
-import { tmpdir } from "node:os";
-import path from "node:path";
-import test, { type TestContext } from "node:test";
-import { fileURLToPath } from "node:url";
 import { sha256 } from "../../packages/ceal-worker-cli/src/sha256.ts";
 import { materializeSignedGatewayProtocolSource } from "../../scripts/materialize-signed-gateway-protocol-source.ts";
 import {
@@ -14,9 +6,9 @@ import {
 	runCli,
 	type SyncArchiveConsumer,
 	validateGatewayHandoffPacketFiles,
-	WorkerReleaseInputError,
 	withWorkerReleaseDevelopmentInputs,
 	withWorkerReleaseDevelopmentInputsAsync,
+	WorkerReleaseInputError,
 } from "../../scripts/worker-release-inputs.ts";
 import { assertCliFailureChannels } from "../cli-failure-channels.ts";
 import { createProtocolRepoFixture } from "../converged-protocol-repo-fixture.ts";
@@ -26,8 +18,16 @@ import {
 	PROTOCOL_HANDOFF_MARKER_NAME,
 	type ProtocolArtifactProvenance,
 } from "../protocol-artifact-provenance.ts";
-import { type ReleasePackageRecordInput, releasePackageRecord } from "../release-package-record.ts";
+import { releasePackageRecord,type ReleasePackageRecordInput } from "../release-package-record.ts";
 import { scratchDir } from "../scratch-dir.ts";
+import assert from "node:assert/strict";
+import { execFileSync } from "node:child_process";
+import { createHash } from "node:crypto";
+import { cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import path from "node:path";
+import test, { type TestContext } from "node:test";
+import { fileURLToPath } from "node:url";
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..", "..");
 const CONTRACT_REPO = createProtocolRepoFixture();

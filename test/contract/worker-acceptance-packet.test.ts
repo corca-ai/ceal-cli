@@ -1,9 +1,3 @@
-import assert from "node:assert/strict";
-import { type SpawnSyncOptionsWithStringEncoding, type SpawnSyncReturns, spawnSync } from "node:child_process";
-import { chmodSync, mkdirSync, readFileSync, symlinkSync, unlinkSync, writeFileSync } from "node:fs";
-import path from "node:path";
-import test from "node:test";
-import { fileURLToPath } from "node:url";
 import { CEAL_ACCEPTANCE_RECEIPT_KEYS } from "../../packages/ceal-worker-cli/dist/acceptance-receipt.js";
 import {
 	CEAL_ACCEPTANCE_BOUNDED_CALL_KEYS,
@@ -25,6 +19,12 @@ import {
 } from "../../scripts/worker-acceptance-packet.ts";
 import { createProtocolRepoFixture } from "../converged-protocol-repo-fixture.ts";
 import { scratchDir } from "../scratch-dir.ts";
+import assert from "node:assert/strict";
+import { spawnSync,type SpawnSyncOptionsWithStringEncoding, type SpawnSyncReturns } from "node:child_process";
+import { chmodSync, mkdirSync, readFileSync, symlinkSync, unlinkSync, writeFileSync } from "node:fs";
+import path from "node:path";
+import test from "node:test";
+import { fileURLToPath } from "node:url";
 
 // Contract tier and offline by design: every refusal below is a decision this
 // command makes before it would contact anything, and the whole point of the

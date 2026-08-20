@@ -27,14 +27,14 @@
 // Coverage is collected across BOTH tiers because it takes both: the contract
 // tier alone reaches about 55%. That is why this belongs to `npm run check` and
 // not to `npm run check:unit`.
+import { exitWith } from "./lib/exit-with.ts";
+import { isObjectRecord } from "./lib/object-record.ts";
+import { isStringArray } from "./lib/string-array.ts";
 import { spawnSync } from "node:child_process";
 import { existsSync, readdirSync, readFileSync, rmSync } from "node:fs";
 import path from "node:path";
 import process from "node:process";
 import { fileURLToPath } from "node:url";
-import { exitWith } from "./lib/exit-with.ts";
-import { isObjectRecord } from "./lib/object-record.ts";
-import { isStringArray } from "./lib/string-array.ts";
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const CONFIG = ".c8rc.scripts.json";

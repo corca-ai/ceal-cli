@@ -1,8 +1,3 @@
-import assert from "node:assert/strict";
-import { readFileSync } from "node:fs";
-import { createServer } from "node:http";
-import test from "node:test";
-import { CEAL_GATEWAY_DECODE_GENERATION_HEADER } from "@corca-ai/ceal-protocol";
 import { required as requiredValue } from "../../../test/required.ts";
 import { CealEnrollmentClientError, createCealEnrollmentClient } from "../src/index.ts";
 import {
@@ -19,6 +14,11 @@ import {
 	responseFetch,
 	untrustedResponseCases,
 } from "./client-response-test-support.ts";
+import { CEAL_GATEWAY_DECODE_GENERATION_HEADER } from "@corca-ai/ceal-protocol";
+import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
+import { createServer } from "node:http";
+import test from "node:test";
 
 test("enrollment client exchanges one code over the derived loopback route", async () => {
 	const requests: Array<{ url: string | undefined; decodeGeneration: string | undefined; body: ReturnType<typeof parseJsonRecord> }> = [];

@@ -1,9 +1,9 @@
+import { generateLeasedConsumerHandoffRuntime } from "../scripts/generate-leased-consumer-handoff-runtime.ts";
 import { execFileSync } from "node:child_process";
 import { cpSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { generateLeasedConsumerHandoffRuntime } from "../scripts/generate-leased-consumer-handoff-runtime.ts";
 
 const SOURCE_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const FIXTURE_GATEWAY_COMMIT = "a".repeat(40);

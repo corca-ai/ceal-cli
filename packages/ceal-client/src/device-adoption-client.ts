@@ -1,3 +1,5 @@
+import { CEAL_SESSION_CLIENT_TIMEOUT_MS, resolveRequestBounds } from "./request-bounds.js";
+import { exchangeSessionJson, resolveSessionEndpoint } from "./session-http-client.js";
 import {
 	CEAL_DEVICE_ENROLLMENT_POLL_SCHEMA,
 	CEAL_DEVICE_ENROLLMENT_START_SCHEMA,
@@ -10,8 +12,6 @@ import {
 	decodeCealDeviceEnrollmentStartRequest,
 	decodeCealDeviceEnrollmentStartResult,
 } from "@corca-ai/ceal-protocol";
-import { CEAL_SESSION_CLIENT_TIMEOUT_MS, resolveRequestBounds } from "./request-bounds.js";
-import { exchangeSessionJson, resolveSessionEndpoint } from "./session-http-client.js";
 
 // Transport for the two verified-email first-device adoption routes. It carries
 // typed requests and hands back Gateway-decoded responses; every decision about

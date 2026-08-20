@@ -1,7 +1,3 @@
-import { execFileSync } from "node:child_process";
-import { copyFileSync, existsSync, lstatSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync } from "node:fs";
-import { tmpdir } from "node:os";
-import path from "node:path";
 import { isJsonRecord } from "../packages/ceal-worker-cli/src/json-record.ts";
 import { sha256 } from "../packages/ceal-worker-cli/src/sha256.ts";
 import { codedErrorClass } from "./lib/coded-error.ts";
@@ -9,6 +5,10 @@ import { isGitObject } from "./lib/git-object.ts";
 import { isLowercaseHexDigest } from "./lib/hex-digest.ts";
 import { isPromiseLike } from "./lib/promise-like.ts";
 import { createJsonReader } from "./lib/read-json.ts";
+import { execFileSync } from "node:child_process";
+import { copyFileSync, existsSync, lstatSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import path from "node:path";
 
 const LOCK_FILENAME = "gateway-protocol-handoff-lock.json";
 const LOCK_SCHEMA_V1 = "ceal.worker_gateway_protocol_handoff_lock.v1";

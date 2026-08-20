@@ -1,4 +1,4 @@
-import { createHash } from "node:crypto";
+import { required as requiredValue } from "../../../test/required.ts";
 import {
 	attachmentStreamManifestSha256,
 	CEAL_LEASED_CONSUMER_ATTACHMENT_STREAM_EFFECTIVE_LIMITS,
@@ -9,7 +9,7 @@ import {
 	type CealLeasedConsumerAttachmentStreamManifest,
 	encodeCealLeasedConsumerAttachmentStreamRecord,
 } from "@corca-ai/ceal-protocol";
-import { required as requiredValue } from "../../../test/required.ts";
+import { createHash } from "node:crypto";
 
 type ManifestOverrides = Partial<CealLeasedConsumerAttachmentStreamManifest["limits"]>;
 type AttachmentPayload = readonly [slot: number, bytes: Uint8Array];

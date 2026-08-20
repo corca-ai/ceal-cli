@@ -1,5 +1,3 @@
-import assert from "node:assert/strict";
-import test from "node:test";
 import {
 	consumerDependencyClosure,
 	lockPackages,
@@ -7,6 +5,8 @@ import {
 	readConsumerClosure,
 	UnpinnedDependencyError,
 } from "../../scripts/prewarm-offline-consumer-cache.ts";
+import assert from "node:assert/strict";
+import test from "node:test";
 
 function lockOf(packages: Record<string, Record<string, unknown>>) {
 	return { packages };

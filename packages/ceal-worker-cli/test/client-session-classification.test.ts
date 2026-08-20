@@ -1,10 +1,10 @@
-import assert from "node:assert/strict";
-import test from "node:test";
 import {
 	classifiedClientSessionFailureReasons,
 	classifyClientSessionFailure,
 	isClassifiedClientSessionFailure,
 } from "../dist/client-session.js";
+import assert from "node:assert/strict";
+import test from "node:test";
 
 // These two readers used to keep separate hand-maintained lists, and the second
 // gates whether `call`/`receipt` attach the classification at all. A reason known

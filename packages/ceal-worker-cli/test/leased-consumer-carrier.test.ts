@@ -1,3 +1,10 @@
+import {
+	LEASED_CONSUMER_CARRIER_ARGV,
+	type LeasedConsumerCarrierRuntime,
+	readLeasedConsumerRequest,
+	runLeasedConsumerCarrier,
+} from "../dist/leased-consumer-carrier.js";
+import { postUnixSocket } from "../dist/private-worker-transport.js";
 import assert from "node:assert/strict";
 import { spawn } from "node:child_process";
 import { closeSync, openSync, readFileSync } from "node:fs";
@@ -8,13 +15,6 @@ import { join } from "node:path";
 import process from "node:process";
 import test from "node:test";
 import { fileURLToPath } from "node:url";
-import {
-	LEASED_CONSUMER_CARRIER_ARGV,
-	type LeasedConsumerCarrierRuntime,
-	readLeasedConsumerRequest,
-	runLeasedConsumerCarrier,
-} from "../dist/leased-consumer-carrier.js";
-import { postUnixSocket } from "../dist/private-worker-transport.js";
 
 type HandoffFixture = { vectors: Array<{ id: string; request_body: Record<string, unknown> }> };
 type FetchCall = {

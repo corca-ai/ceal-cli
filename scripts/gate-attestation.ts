@@ -17,15 +17,10 @@
 //            the receipt earns, and unlike `record` it FAILS loudly: a CI
 //            checkout is clean by construction, so a receipt that does not
 //            describe it is a defect in this script, not a fact about the host.
-import { mkdirSync, writeFileSync } from "node:fs";
-import path from "node:path";
-import process from "node:process";
-import { fileURLToPath } from "node:url";
-
 import { exitWith } from "./lib/exit-with.ts";
 import {
-	ATTESTED_PROFILE,
 	attestationArtifactName,
+	ATTESTED_PROFILE,
 	buildGateAttestation,
 	GATE_ATTESTATION_PATH,
 	type GateAttestation,
@@ -35,6 +30,10 @@ import {
 } from "./lib/gate-attestation.ts";
 import { isMainModule } from "./lib/is-main-module.ts";
 import { parseScriptArgs } from "./lib/parse-script-args.ts";
+import { mkdirSync, writeFileSync } from "node:fs";
+import path from "node:path";
+import process from "node:process";
+import { fileURLToPath } from "node:url";
 
 const PREFIX = "gate-attestation";
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");

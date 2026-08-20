@@ -1,6 +1,6 @@
+import { asJsonRecord } from "./json-record.ts";
 import { lstatSync, readFileSync } from "node:fs";
 import path from "node:path";
-import { asJsonRecord } from "./json-record.ts";
 
 type JsonRecord = Record<string, unknown>;
 

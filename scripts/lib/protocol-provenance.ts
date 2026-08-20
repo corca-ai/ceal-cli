@@ -12,9 +12,9 @@
 // Callers inject `fail` so each keeps its own coded-error envelope. The rule
 // takes no position on how a lane reports.
 
+import { asJsonRecord, type JsonRecord } from "./json-record.ts";
 import { existsSync, readFileSync } from "node:fs";
 import path from "node:path";
-import { asJsonRecord, type JsonRecord } from "./json-record.ts";
 
 const PROTOCOL_HANDOFF_LOCK_PATH = "gateway-protocol-handoff-lock.json";
 

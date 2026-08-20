@@ -1,5 +1,3 @@
-import assert from "node:assert/strict";
-import test from "node:test";
 import {
 	callRequestRef,
 	nextTargetCursor,
@@ -11,6 +9,8 @@ import {
 	summarizeYaml,
 	targetRefReturned,
 } from "../../scripts/source-worker-e2e.ts";
+import assert from "node:assert/strict";
+import test from "node:test";
 
 test("source-worker-e2e keeps the live lane explicitly opt-in and records session refresh separately", () => {
 	const options = parseSourceWorkerE2eArgs([

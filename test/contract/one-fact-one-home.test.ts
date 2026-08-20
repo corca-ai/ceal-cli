@@ -6,12 +6,6 @@
 // walk found nothing at all — the failure mode both `production-reachability`
 // and `coverage-scripts` have sections about, and the one that turned a real
 // defect green here twice.
-import assert from "node:assert/strict";
-import { readFileSync } from "node:fs";
-import path from "node:path";
-import type { TestContext } from "node:test";
-import test from "node:test";
-import { fileURLToPath } from "node:url";
 import {
 	analyzeDuplicateLiterals,
 	DUPLICATE_LITERAL_EXEMPTIONS,
@@ -20,6 +14,12 @@ import {
 import { analyzeStoreLockCensus } from "../../scripts/lib/store-lock-census.ts";
 import { required as requiredValue } from "../required.ts";
 import { scratchTree } from "../scratch-dir.ts";
+import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
+import path from "node:path";
+import type { TestContext } from "node:test";
+import test from "node:test";
+import { fileURLToPath } from "node:url";
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..", "..");
 const PACKAGE = "packages/ceal-worker-cli/src";

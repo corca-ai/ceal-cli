@@ -1,6 +1,6 @@
-import { createHash } from "node:crypto";
 import type { CealStoredSession } from "./profile-store.js";
 import { isSha256Digest } from "./sha256.js";
+import { createHash } from "node:crypto";
 
 // One home for the bindings that define which operator identity a stored
 // session represents. Enrollment replacement and every session-derived local

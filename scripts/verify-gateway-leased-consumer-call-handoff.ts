@@ -1,13 +1,13 @@
 #!/usr/bin/env node
 
-import { closeSync, constants, fstatSync, lstatSync, openSync, readFileSync } from "node:fs";
-import path from "node:path";
-import { fileURLToPath } from "node:url";
 import { sameCanonicalJson } from "../packages/ceal-worker-cli/src/canonical-json.ts";
 import { isJsonRecord } from "../packages/ceal-worker-cli/src/json-record.ts";
 import { sha256 } from "../packages/ceal-worker-cli/src/sha256.ts";
 import { isGitObject } from "./lib/git-object.ts";
 import { isLowercaseHexDigest } from "./lib/hex-digest.ts";
+import { closeSync, constants, fstatSync, lstatSync, openSync, readFileSync } from "node:fs";
+import path from "node:path";
+import { fileURLToPath } from "node:url";
 
 type JsonRecord = Record<string, unknown>;
 type HandoffErrorCode =

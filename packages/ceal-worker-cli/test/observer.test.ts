@@ -1,11 +1,4 @@
-import assert from "node:assert/strict";
-import { mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
-import { request as httpRequest } from "node:http";
-import { tmpdir } from "node:os";
-import path from "node:path";
-import test from "node:test";
-import { parse } from "yaml";
-import { requiredCapture, required as requiredValue } from "../../../test/required.ts";
+import { required as requiredValue,requiredCapture } from "../../../test/required.ts";
 import type { CealDiscoveryCacheKey } from "../dist/discovery-cache.js";
 import { createCealDiscoveryCacheStore, DEFAULT_DISCOVERY_CACHE_TTL_MS, discoveryCacheEntryUsable } from "../dist/discovery-cache.js";
 import { runCealCommand } from "../dist/index.js";
@@ -16,6 +9,13 @@ import { createCealSessionStore } from "../dist/profile-store.js";
 import type { CealReceiptSpoolEntry } from "../dist/receipt-spool.js";
 import { createCealReceiptSpoolStore as createRawReceiptSpoolStore } from "../dist/receipt-spool.js";
 import { createCealSessionCapability } from "../dist/session-capability.js";
+import assert from "node:assert/strict";
+import { mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { request as httpRequest } from "node:http";
+import { tmpdir } from "node:os";
+import path from "node:path";
+import test from "node:test";
+import { parse } from "yaml";
 
 const ACCESS_TOKEN = `ceal_personal_${"P".repeat(43)}`;
 const REFRESH_TOKEN = `ceal_refresh_${"R".repeat(43)}`;

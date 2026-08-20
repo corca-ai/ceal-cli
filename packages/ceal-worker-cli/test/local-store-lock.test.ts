@@ -1,3 +1,7 @@
+import { resolveAnchoredDirectory } from "../dist/local-store-anchor.js";
+import { withLocalStoreLock } from "../dist/local-store-lock.js";
+import type { LocalStoreLockOptions } from "../src/local-store-lock.js";
+import { transformSync } from "esbuild";
 import assert from "node:assert/strict";
 import { spawn } from "node:child_process";
 import fs, { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, statSync, utimesSync, writeFileSync } from "node:fs";
@@ -5,10 +9,6 @@ import { syncBuiltinESMExports } from "node:module";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import test from "node:test";
-import { transformSync } from "esbuild";
-import { resolveAnchoredDirectory } from "../dist/local-store-anchor.js";
-import { withLocalStoreLock } from "../dist/local-store-lock.js";
-import type { LocalStoreLockOptions } from "../src/local-store-lock.js";
 
 // Every branch below was uncovered on both sides of the extraction that made
 // this module shared: the session store had carried the same code privately

@@ -1,6 +1,14 @@
 #!/usr/bin/env node
 
-import { execFileSync, type SpawnSyncReturns, spawnSync } from "node:child_process";
+import { isJsonRecord } from "../packages/ceal-worker-cli/src/json-record.ts";
+import { sha256 } from "../packages/ceal-worker-cli/src/sha256.ts";
+import { codedErrorClass } from "./lib/coded-error.ts";
+import { isGitObject } from "./lib/git-object.ts";
+import { type NpmPackMetadata, parseNpmPackMetadata } from "./lib/npm-pack-metadata.ts";
+import { createSkillDirectoryBundle } from "./lib/skill-directory-bundle.ts";
+import { isStringArray } from "./lib/string-array.ts";
+import { toolchainEnv } from "./lib/toolchain-env.ts";
+import { execFileSync, spawnSync,type SpawnSyncReturns } from "node:child_process";
 import {
 	cpSync,
 	existsSync,
@@ -17,14 +25,6 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import process from "node:process";
 import { fileURLToPath } from "node:url";
-import { isJsonRecord } from "../packages/ceal-worker-cli/src/json-record.ts";
-import { sha256 } from "../packages/ceal-worker-cli/src/sha256.ts";
-import { codedErrorClass } from "./lib/coded-error.ts";
-import { isGitObject } from "./lib/git-object.ts";
-import { type NpmPackMetadata, parseNpmPackMetadata } from "./lib/npm-pack-metadata.ts";
-import { createSkillDirectoryBundle } from "./lib/skill-directory-bundle.ts";
-import { isStringArray } from "./lib/string-array.ts";
-import { toolchainEnv } from "./lib/toolchain-env.ts";
 
 type PackageManifest = {
 	name?: unknown;

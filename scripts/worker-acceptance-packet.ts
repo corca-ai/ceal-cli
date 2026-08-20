@@ -21,11 +21,6 @@
 // Without `--capability`/`--target` the live provider row is left as an
 // explicit non-claim. A bounded capability call is a real provider action and
 // is therefore opt-in per run, never a default of a verification command.
-import { createHash } from "node:crypto";
-import { existsSync, lstatSync, readdirSync, readFileSync, realpathSync } from "node:fs";
-import path from "node:path";
-import process from "node:process";
-import { fileURLToPath } from "node:url";
 import { projectAcceptanceReceipt } from "../packages/ceal-worker-cli/dist/acceptance-receipt.js";
 import { runBoundedProcess } from "../packages/ceal-worker-cli/dist/bounded-process.js";
 import { type InstalledWorkerRelease, resolveInstalledWorkerRelease } from "../packages/ceal-worker-cli/dist/managed-worker-install.js";
@@ -33,6 +28,11 @@ import { isJsonRecord as isRecord } from "../packages/ceal-worker-cli/src/json-r
 import { codedErrorClass } from "./lib/coded-error.ts";
 import { verifyProtocolProvenanceAgainstLock } from "./lib/protocol-provenance.ts";
 import { assertShippableProtocolVendorPin, ProtocolVendorPinError } from "./verify-protocol-vendor-pin.ts";
+import { createHash } from "node:crypto";
+import { existsSync, lstatSync, readdirSync, readFileSync, realpathSync } from "node:fs";
+import path from "node:path";
+import process from "node:process";
+import { fileURLToPath } from "node:url";
 
 const REPO_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const MANIFEST_PREFIX = "ceal-worker-release-manifest-";
@@ -724,7 +724,7 @@ function render(packet: AcceptancePacket): string {
 	const client = packet.installed_client;
 	lines.push(`installed:  ${client.release_version} ${client.platform}  ${client.artifact_sha256}`);
 	lines.push(`            ${client.binary_path}`);
-	lines.push(`            digests agree: bytes = manifest = SHA256SUMS`);
+	lines.push("            digests agree: bytes = manifest = SHA256SUMS");
 	const producer = packet.gateway_protocol_input.producer;
 	lines.push(
 		`protocol:   ${packet.gateway_protocol_input.package}@${packet.gateway_protocol_input.version} from ${producer.repository}@${producer.commit}`,

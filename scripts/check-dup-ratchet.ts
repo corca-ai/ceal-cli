@@ -22,13 +22,13 @@
 // when it looks like the quality skill, then the newest versioned plugin cache
 // entry, then the charness source checkout. Override the whole thing with
 // CEAL_SKIP_DUP_RATCHET=1 when you need the push without it.
+import { exitWith } from "./lib/exit-with.ts";
 import { spawnSync } from "node:child_process";
 import { existsSync, readdirSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import process from "node:process";
 import { fileURLToPath } from "node:url";
-import { exitWith } from "./lib/exit-with.ts";
 
 const GATE = path.join("scripts", "check_dup_ratchet.py");
 const ADAPTER = path.join(path.dirname(fileURLToPath(import.meta.url)), "run_dup_ratchet.py");

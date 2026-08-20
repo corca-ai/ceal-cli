@@ -1,8 +1,3 @@
-import assert from "node:assert/strict";
-import { cpSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
-import { tmpdir } from "node:os";
-import path from "node:path";
-import test, { type TestContext } from "node:test";
 import { createSkillDirectoryBundle } from "../scripts/lib/skill-directory-bundle.ts";
 import {
 	decodeB1Result,
@@ -10,6 +5,11 @@ import {
 	verifyGatewayProtocolConsumer,
 } from "../scripts/verify-gateway-protocol-consumer.ts";
 import { makeGatewayProtocolFixture, REPO_ROOT } from "./gateway-protocol-fixture.ts";
+import assert from "node:assert/strict";
+import { cpSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import path from "node:path";
+import test, { type TestContext } from "node:test";
 
 test("the corrected development packet satisfies the installed B1 boundary", (context) => {
 	const fixture = protocolFixture(context);

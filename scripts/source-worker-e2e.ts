@@ -8,6 +8,7 @@
 // installed release. It never chooses a provider capability or target on its
 // own; the operator supplies values returned by live discovery.
 
+import { CEAL_SAFE_CURSOR } from "../packages/ceal-worker-cli/src/safe-ref.ts";
 import { spawn, spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
 import { existsSync, readFileSync } from "node:fs";
@@ -15,7 +16,6 @@ import path from "node:path";
 import process from "node:process";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { parse as parseYaml, stringify as stringifyYaml } from "yaml";
-import { CEAL_SAFE_CURSOR } from "../packages/ceal-worker-cli/src/safe-ref.ts";
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const WORKER_ENTRYPOINT = path.join(ROOT, "packages/ceal-worker-cli/dist/bin.js");

@@ -1,6 +1,6 @@
+import { parseNpmPackMetadata } from "../scripts/lib/npm-pack-metadata.ts";
 import assert from "node:assert/strict";
 import test from "node:test";
-import { parseNpmPackMetadata } from "../scripts/lib/npm-pack-metadata.ts";
 
 const entry = {
 	name: "@corca-ai/example",

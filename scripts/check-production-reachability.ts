@@ -4,11 +4,11 @@
 // Reports what no production path under `scripts/` reaches, and exits non-zero
 // when there is anything to report. See `lib/production-reachability.ts` for
 // why neither coverage nor `knip` answers this question here.
+import { exitWith } from "./lib/exit-with.ts";
+import { analyzeProductionReachability } from "./lib/production-reachability.ts";
 import path from "node:path";
 import process from "node:process";
 import { fileURLToPath } from "node:url";
-import { exitWith } from "./lib/exit-with.ts";
-import { analyzeProductionReachability } from "./lib/production-reachability.ts";
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const report = analyzeProductionReachability({ repoRoot: ROOT });

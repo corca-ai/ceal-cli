@@ -1,11 +1,11 @@
 #!/usr/bin/env node
 
-import { type ExecFileSyncOptions, execFileSync } from "node:child_process";
+import { isGitObject } from "./lib/git-object.ts";
+import { execFileSync,type ExecFileSyncOptions } from "node:child_process";
 import { existsSync, lstatSync, mkdirSync, mkdtempSync, readdirSync, renameSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { isGitObject } from "./lib/git-object.ts";
 
 const ORIGIN = "https://github.com/corca-ai/ceal.git";
 const TAG = /^gateway-protocol-handoff-v\d+[.]\d+[.]\d+$/u;

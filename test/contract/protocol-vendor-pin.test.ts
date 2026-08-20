@@ -1,14 +1,14 @@
-import assert from "node:assert/strict";
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
-import { tmpdir } from "node:os";
-import path from "node:path";
-import test from "node:test";
 import { isJsonRecord } from "../../packages/ceal-worker-cli/src/json-record.ts";
 import {
 	assertShippableProtocolVendorPin,
 	ProtocolVendorPinError,
 	validateProtocolVendorPin,
 } from "../../scripts/verify-protocol-vendor-pin.ts";
+import assert from "node:assert/strict";
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import path from "node:path";
+import test from "node:test";
 
 type ValidationOptions = Parameters<typeof validateProtocolVendorPin>[0];
 type ProtocolVendorPinFixture = {

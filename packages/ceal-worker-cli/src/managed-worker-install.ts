@@ -1,6 +1,6 @@
+import { isSha256Digest, sha256 } from "./sha256.js";
 import { lstatSync, readFileSync, realpathSync } from "node:fs";
 import { dirname, join } from "node:path";
-import { isSha256Digest, sha256 } from "./sha256.js";
 
 export interface InstalledWorkerRelease {
 	commandPath: string;

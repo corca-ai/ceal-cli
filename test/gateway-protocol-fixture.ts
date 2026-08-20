@@ -1,13 +1,13 @@
+import { sha256 } from "../packages/ceal-worker-cli/src/sha256.ts";
+import { parseNpmPackMetadata } from "../scripts/lib/npm-pack-metadata.ts";
+import { toolchainEnv } from "../scripts/lib/toolchain-env.ts";
+import { withBuiltPackages } from "./repo-build.ts";
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
 import { cpSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { sha256 } from "../packages/ceal-worker-cli/src/sha256.ts";
-import { parseNpmPackMetadata } from "../scripts/lib/npm-pack-metadata.ts";
-import { toolchainEnv } from "../scripts/lib/toolchain-env.ts";
-import { withBuiltPackages } from "./repo-build.ts";
 
 // `URL.pathname` is percent-encoded, so a checkout under a path containing a
 // space (or any escaped character) yields "%20" here and every derived path fails

@@ -1,7 +1,7 @@
-import assert from "node:assert/strict";
-import test from "node:test";
 import { required as requiredValue } from "../../../test/required.ts";
 import { CealHpkeError, generateCealHpkeKeyPair, openCealHpkeMessage, sealCealHpkeMessage } from "../dist/hpke.js";
+import assert from "node:assert/strict";
+import test from "node:test";
 
 // A round-trip proves only that this module agrees with itself, and a key
 // schedule that is consistently wrong round-trips perfectly. The first test is

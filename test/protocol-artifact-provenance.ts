@@ -1,6 +1,6 @@
+import type { ReleasePackageRecordInput } from "./release-package-record.ts";
 import { writeFileSync } from "node:fs";
 import path from "node:path";
-import type { ReleasePackageRecordInput } from "./release-package-record.ts";
 
 export const PROTOCOL_HANDOFF_MARKER_NAME = ".ceal-protocol-handoff-owner";
 export const PROTOCOL_HANDOFF_MARKER_CONTENTS = "ceal.gateway_protocol_handoff.v1\n";

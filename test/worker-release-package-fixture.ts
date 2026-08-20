@@ -1,3 +1,10 @@
+import { sha256 } from "../packages/ceal-worker-cli/src/sha256.ts";
+import { parseNpmPackMetadata } from "../scripts/lib/npm-pack-metadata.ts";
+import { toolchainEnv } from "../scripts/lib/toolchain-env.ts";
+import { createProtocolRepoFixture } from "./converged-protocol-repo-fixture.ts";
+import { createProtocolArtifactFixture, type ProtocolArtifactFixture } from "./protocol-artifact-provenance.ts";
+import { releasePackageRecord,type ReleasePackageRecordInput } from "./release-package-record.ts";
+import { withBuiltPackages } from "./repo-build.ts";
 import { execFileSync } from "node:child_process";
 import { createHash } from "node:crypto";
 import { mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
@@ -5,13 +12,6 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import type { SuiteContext, TestContext } from "node:test";
 import { fileURLToPath } from "node:url";
-import { sha256 } from "../packages/ceal-worker-cli/src/sha256.ts";
-import { parseNpmPackMetadata } from "../scripts/lib/npm-pack-metadata.ts";
-import { toolchainEnv } from "../scripts/lib/toolchain-env.ts";
-import { createProtocolRepoFixture } from "./converged-protocol-repo-fixture.ts";
-import { createProtocolArtifactFixture, type ProtocolArtifactFixture } from "./protocol-artifact-provenance.ts";
-import { type ReleasePackageRecordInput, releasePackageRecord } from "./release-package-record.ts";
-import { withBuiltPackages } from "./repo-build.ts";
 
 export const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 

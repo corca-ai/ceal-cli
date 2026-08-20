@@ -1,9 +1,3 @@
-import assert from "node:assert/strict";
-import { execFileSync, spawnSync } from "node:child_process";
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
-import { tmpdir } from "node:os";
-import path from "node:path";
-import test from "node:test";
 import { renderScriptFailure } from "../../scripts/lib/cli-output.ts";
 import { codedErrorClass } from "../../scripts/lib/coded-error.ts";
 import { isObjectRecord } from "../../scripts/lib/object-record.ts";
@@ -13,6 +7,12 @@ import { toolchainEnv } from "../../scripts/lib/toolchain-env.ts";
 import { GatewayProtocolConsumerError } from "../../scripts/verify-gateway-protocol-consumer.ts";
 import { assertCliFailureChannels } from "../cli-failure-channels.ts";
 import { required as requiredValue } from "../required.ts";
+import assert from "node:assert/strict";
+import { execFileSync, spawnSync } from "node:child_process";
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import path from "node:path";
+import test from "node:test";
 
 const ScriptArgumentError = codedErrorClass("ScriptArgumentError");
 

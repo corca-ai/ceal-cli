@@ -1,11 +1,10 @@
+import { allMarkdownFiles, isGeneralMarkdown, main, MARKDOWN_EXCLUSIONS, stagedMarkdownFiles } from "../../scripts/check-markdown.ts";
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
 import { cpSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import test from "node:test";
-
-import { allMarkdownFiles, isGeneralMarkdown, MARKDOWN_EXCLUSIONS, main, stagedMarkdownFiles } from "../../scripts/check-markdown.ts";
 
 const ROOT = path.resolve(new URL("../..", import.meta.url).pathname);
 

@@ -13,7 +13,6 @@ const toolsTypecheckConfigPath = path.join(ROOT, "tsconfig.tools.json");
 const toolsTypecheckConfig = JSON.parse(readFileSync(toolsTypecheckConfigPath, "utf8"));
 const testsTypecheckConfigPath = path.join(ROOT, "tsconfig.tests.json");
 const testsTypecheckConfig = JSON.parse(readFileSync(testsTypecheckConfigPath, "utf8"));
-const biomeConfig = JSON.parse(readFileSync(path.join(ROOT, "biome.json"), "utf8"));
 function trackedSourceFiles() {
 	return execFileSync(
 		"git",
@@ -62,8 +61,8 @@ test("source typecheck resolves workspace packages to exact editable source entr
 });
 
 test("explicit any is a native lint error in the Worker full route", () => {
-	assert.equal(manifest.scripts.lint, "biome check .");
-	assert.equal(biomeConfig.linter.rules.suspicious.noExplicitAny, "error");
+	assert.equal(manifest.scripts.lint, "eslint .");
+	assert.match(readFileSync(path.join(ROOT, "eslint.config.ts"), "utf8"), /"@typescript-eslint\/no-explicit-any":\s*"error"/u);
 	assert.match(manifest.scripts.check, /^npm run lint &&/u);
 });
 

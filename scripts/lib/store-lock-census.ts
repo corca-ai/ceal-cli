@@ -19,8 +19,8 @@
 // Parsed with the TypeScript compiler rather than matched with a regex, for the
 // reason `production-reachability.ts` states: a regex that quietly stops
 // matching leaves a gate green while claiming to have walked the tree.
-import ts from "typescript";
 import { forEachOwnedSource } from "./owned-package-sources.ts";
+import ts from "typescript";
 
 /**
  * A call to one of these mutates the store on disk. `openSync` is conditional —

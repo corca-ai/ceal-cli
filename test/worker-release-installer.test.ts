@@ -1,3 +1,10 @@
+import { sha256 as digest } from "../packages/ceal-worker-cli/src/sha256.ts";
+import { buildWorkerNativeArtifactFromDevelopmentInputs } from "../scripts/build-worker-native-artifact.ts";
+import { writeClientSessionStoreFixture } from "./client-session-store-fixture.ts";
+import { requireHostTools } from "./host-tools.ts";
+import { platformProofTest } from "./platform-proof.ts";
+import { execReleaseTestProcess, processIsAlive, runSyncReleaseProcess } from "./release-process-bounds.ts";
+import { packedProtocolFixture } from "./worker-release-package-fixture.ts";
 import assert from "node:assert/strict";
 import {
 	chmodSync,
@@ -19,13 +26,6 @@ import process from "node:process";
 import test, { type TestFn } from "node:test";
 import { fileURLToPath } from "node:url";
 import { parse } from "yaml";
-import { sha256 as digest } from "../packages/ceal-worker-cli/src/sha256.ts";
-import { buildWorkerNativeArtifactFromDevelopmentInputs } from "../scripts/build-worker-native-artifact.ts";
-import { writeClientSessionStoreFixture } from "./client-session-store-fixture.ts";
-import { requireHostTools } from "./host-tools.ts";
-import { platformProofTest } from "./platform-proof.ts";
-import { execReleaseTestProcess, processIsAlive, runSyncReleaseProcess } from "./release-process-bounds.ts";
-import { packedProtocolFixture } from "./worker-release-package-fixture.ts";
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const INSTALLER = path.join(ROOT, "install-ceal.sh");
@@ -459,7 +459,7 @@ test("worker installer rejects a manifest that does not bind this release, platf
 	// duplicate key whose second copy is correct would otherwise be accepted,
 	// because the later line overwrites the earlier one.
 	withFixture(({ install, release, tools, log }) => {
-		const manifestPath = path.join(release, `ceal-worker-release-manifest-linux-arm64.json`);
+		const manifestPath = path.join(release, "ceal-worker-release-manifest-linux-arm64.json");
 		writeManifest(release, "linux-arm64");
 		writeFileSync(
 			manifestPath,

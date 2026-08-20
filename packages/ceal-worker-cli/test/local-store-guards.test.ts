@@ -1,10 +1,10 @@
+import { assertDirectory, assertFile, prepareDirectory, removeOwnedFile, safeExistingFile } from "../dist/local-store-guards.js";
 import assert from "node:assert/strict";
 import { spawn } from "node:child_process";
 import { chmodSync, existsSync, linkSync, mkdirSync, mkdtempSync, renameSync, rmSync, statSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import test, { type TestContext } from "node:test";
-import { assertDirectory, assertFile, prepareDirectory, removeOwnedFile, safeExistingFile } from "../dist/local-store-guards.js";
 
 class Refused extends Error {}
 function unsafe(): never {

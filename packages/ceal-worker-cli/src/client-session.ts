@@ -1,6 +1,3 @@
-import { randomBytes } from "node:crypto";
-import { CealEnrollmentClientError, createCealEnrollmentClient, createCealPersonalClientSessionClient } from "@corca-ai/ceal";
-import type { CealClientRefreshResult, CealClientRefreshResultV2 } from "@corca-ai/ceal-protocol";
 import type { CealCliIo, CealCommandContext } from "./cli-runtime.js";
 import { SESSION_REPLACEMENT_NEXT_ACTION, SESSION_SETUP_NEXT_ACTION } from "./command-definitions.js";
 import { adoptSession } from "./device-adoption.js";
@@ -24,6 +21,9 @@ import {
 } from "./session-replacement.js";
 import { type CealSubcommandHandlers, resolveSubcommandRoute } from "./subcommands.js";
 import { withCealTiming } from "./timing.js";
+import { CealEnrollmentClientError, createCealEnrollmentClient, createCealPersonalClientSessionClient } from "@corca-ai/ceal";
+import type { CealClientRefreshResult, CealClientRefreshResultV2 } from "@corca-ai/ceal-protocol";
+import { randomBytes } from "node:crypto";
 
 const CREDENTIAL_CONTEXT = "gateway_issued_client_session" as const;
 

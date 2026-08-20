@@ -1,8 +1,8 @@
-import { CealPersonalClientSessionError, createCealPersonalClientSessionClient } from "@corca-ai/ceal";
 import { CealSessionStoreError, type CealStoredSession } from "./profile-store.js";
 import type { CealSessionCapabilityDependencies } from "./session-capability.js";
 import { changedSessionIdentityBindings } from "./session-identity.js";
 import { withCealTiming } from "./timing.js";
+import { CealPersonalClientSessionError, createCealPersonalClientSessionClient } from "@corca-ai/ceal";
 
 // One home holds exactly one session (`profile-store.ts`, `~/.ceal/client-session.json`),
 // so `session enroll` and `session adopt` are not only first-configuration
@@ -32,29 +32,29 @@ export type CealRevokeDisposition = "revoked" | "already_unusable" | "unavailabl
 
 export type CealSessionCommit =
 	| {
-			ok: true;
-			/** `first_session` had nothing to displace; `same_identity` is a renewal; `replaced` consumed `--force`. */
-			replacement: "first_session" | "same_identity" | "replaced";
-			previousSessionRevoked: CealRevokeDisposition;
-			derivedStateCleared: boolean;
-	  }
+		ok: true;
+		/** `first_session` had nothing to displace; `same_identity` is a renewal; `replaced` consumed `--force`. */
+		replacement: "first_session" | "same_identity" | "replaced";
+		previousSessionRevoked: CealRevokeDisposition;
+		derivedStateCleared: boolean;
+	}
 	| {
-			ok: false;
-			reason: "identity_conflict";
-			/** Named, so the operator learns *what* changed rather than that something did. */
-			changedBindings: readonly string[];
-			/** The session this command just caused the Gateway to issue and then refused to keep. */
-			issuedSessionRevoked: CealRevokeDisposition;
-	  }
+		ok: false;
+		reason: "identity_conflict";
+		/** Named, so the operator learns *what* changed rather than that something did. */
+		changedBindings: readonly string[];
+		/** The session this command just caused the Gateway to issue and then refused to keep. */
+		issuedSessionRevoked: CealRevokeDisposition;
+	}
 	| {
-			ok: false;
-			reason: "store_failure";
-			code: string;
-			/** A replacement that already revoked the displaced session before failing to write. */
-			previousSessionEnded: boolean;
-			/** The Gateway-issued session this failed commit must not leave live and unnamed. */
-			issuedSessionRevoked: CealRevokeDisposition;
-	  };
+		ok: false;
+		reason: "store_failure";
+		code: string;
+		/** A replacement that already revoked the displaced session before failing to write. */
+		previousSessionEnded: boolean;
+		/** The Gateway-issued session this failed commit must not leave live and unnamed. */
+		issuedSessionRevoked: CealRevokeDisposition;
+	};
 
 /**
  * Compare, dispose, then write. The comparison happens after the Gateway has

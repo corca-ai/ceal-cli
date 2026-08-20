@@ -1,8 +1,5 @@
 #!/usr/bin/env node
 
-import { readFileSync } from "node:fs";
-import path from "node:path";
-import { fileURLToPath } from "node:url";
 import { isJsonRecord } from "../packages/ceal-worker-cli/src/json-record.ts";
 import { hasExactObjectKeys as exact } from "../packages/ceal-worker-cli/src/object-keys.ts";
 import { sha256 } from "../packages/ceal-worker-cli/src/sha256.ts";
@@ -11,6 +8,9 @@ import { isGitObject } from "./lib/git-object.ts";
 import { isLowercaseHexDigest } from "./lib/hex-digest.ts";
 import { isMainModule } from "./lib/is-main-module.ts";
 import { writeIfChanged } from "./lib/write-if-changed.ts";
+import { readFileSync } from "node:fs";
+import path from "node:path";
+import { fileURLToPath } from "node:url";
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const HANDOFF_PATH = "vendor/gateway-leased-consumer-attachment-stream/gateway-leased-consumer-attachment-stream-conformance.json";

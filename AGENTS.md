@@ -37,8 +37,12 @@ history or full rationale.
 - Measure gates on the current host. The pre-push hook records samples in
   `.charness/quality/command-timing.jsonl`; otherwise time the command yourself.
   Put reproduction commands, not stale measurements, in prose.
-- `npm run lint` is `biome check .` inside both gates. Its three disabled rules
-  and frozen-Protocol exclusion are intentional; read [docs/gates.md](docs/gates.md) before changing them.
+- `npm run lint` is `eslint .` inside both gates, configured only by
+  `eslint.config.ts`. It replaces `biome check .`, whose three jobs it keeps:
+  eslint core dropped formatting in v8.53, so @stylistic carries formatting and
+  simple-import-sort carries import order. That file transcribes the deleted
+  `biome.json` and reasons each deliberate deviation and the frozen-Protocol
+  exclusion in place; read it and [docs/gates.md](docs/gates.md) before changing them.
 - `check.yml` runs the full gate only for paths its `scope` job classifies as
   code. Other workflows are tag-only release lanes. `main` is deliberately
   unprotected; do not change that tradeoff. A pusher owns reading

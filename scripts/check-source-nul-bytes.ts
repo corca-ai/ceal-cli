@@ -4,11 +4,11 @@
 // this host. Keep the source spelling portable and let binary-input fixtures
 // live in data files instead.
 
+import { isMainModule } from "./lib/is-main-module.ts";
 import { execFileSync } from "node:child_process";
 import { readFileSync } from "node:fs";
 import path from "node:path";
 import process from "node:process";
-import { isMainModule } from "./lib/is-main-module.ts";
 
 const NUL = String.fromCharCode(0);
 const SOURCE_GLOBS = ["*.mjs", "*.cjs", "*.js", "*.ts", "*.tsx", "*.py", "*.sh"];

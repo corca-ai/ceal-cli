@@ -1,11 +1,3 @@
-import { createHash } from "node:crypto";
-import {
-	CEAL_LEASED_CONSUMER_ATTACHMENT_STREAM_MAGIC,
-	CEAL_LEASED_CONSUMER_ATTACHMENT_STREAM_MAX_HEADER_BYTES,
-	CEAL_LEASED_CONSUMER_ATTACHMENT_STREAM_RECORD_PREFIX_BYTES,
-	type CealLeasedConsumerAttachmentStreamBinding,
-	decodeCealLeasedConsumerAttachmentStreamRequest,
-} from "@corca-ai/ceal-protocol";
 import {
 	LEASED_CONSUMER_ATTACHMENT_STREAM_CONTRACT_JSON,
 	LEASED_CONSUMER_ATTACHMENT_STREAM_CONTRACT_SHA256,
@@ -21,6 +13,14 @@ import {
 } from "./leased-consumer-protected-session.js";
 import { sameObjectKeys } from "./object-keys.js";
 import { postUnixSocketStream, type UnixSocketErrorNames } from "./private-worker-transport.js";
+import {
+	CEAL_LEASED_CONSUMER_ATTACHMENT_STREAM_MAGIC,
+	CEAL_LEASED_CONSUMER_ATTACHMENT_STREAM_MAX_HEADER_BYTES,
+	CEAL_LEASED_CONSUMER_ATTACHMENT_STREAM_RECORD_PREFIX_BYTES,
+	type CealLeasedConsumerAttachmentStreamBinding,
+	decodeCealLeasedConsumerAttachmentStreamRequest,
+} from "@corca-ai/ceal-protocol";
+import { createHash } from "node:crypto";
 
 const OPERATION_DEADLINE_ENV = "CEAL_LEASED_CONSUMER_OPERATION_DEADLINE_MS";
 const CONTRACT = readCandidateContract();

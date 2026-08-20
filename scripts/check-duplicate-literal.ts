@@ -9,11 +9,11 @@
 // The scanned counts are printed for the same reason the store-lock census
 // prints its module list: a broken directory glob would otherwise report zero
 // duplicates over zero files and read exactly like a clean tree.
+import { analyzeDuplicateLiterals } from "./lib/duplicate-literal.ts";
+import { exitWith } from "./lib/exit-with.ts";
 import path from "node:path";
 import process from "node:process";
 import { fileURLToPath } from "node:url";
-import { analyzeDuplicateLiterals } from "./lib/duplicate-literal.ts";
-import { exitWith } from "./lib/exit-with.ts";
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const report = analyzeDuplicateLiterals({ repoRoot: ROOT });

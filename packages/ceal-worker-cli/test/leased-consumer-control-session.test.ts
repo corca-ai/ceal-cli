@@ -1,13 +1,3 @@
-import assert from "node:assert/strict";
-import { execFileSync, spawn, spawnSync } from "node:child_process";
-import { once } from "node:events";
-import { closeSync, cpSync, mkdtempSync, openSync, readFileSync, rmSync, writeFileSync } from "node:fs";
-import { createServer as createNetServer } from "node:net";
-import { tmpdir } from "node:os";
-import path from "node:path";
-import test from "node:test";
-import { fileURLToPath } from "node:url";
-import { CEAL_LEASED_CONSUMER_RESOURCE_READ_DATA_SCHEMA } from "@corca-ai/ceal-protocol";
 import type { LeasedConsumerControlSessionRuntime, LeasedConsumerNotificationRuntime } from "../dist/leased-consumer-control-session.js";
 import {
 	isInheritedNotificationChannelFd,
@@ -17,6 +7,16 @@ import {
 	writeLeasedConsumerAgentFrame,
 } from "../dist/leased-consumer-control-session.js";
 import { deferred, deferredVoid } from "./deferred-test-support.ts";
+import { CEAL_LEASED_CONSUMER_RESOURCE_READ_DATA_SCHEMA } from "@corca-ai/ceal-protocol";
+import assert from "node:assert/strict";
+import { execFileSync, spawn, spawnSync } from "node:child_process";
+import { once } from "node:events";
+import { closeSync, cpSync, mkdtempSync, openSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { createServer as createNetServer } from "node:net";
+import { tmpdir } from "node:os";
+import path from "node:path";
+import test from "node:test";
+import { fileURLToPath } from "node:url";
 
 type JsonRecord = Record<string, unknown>;
 type ControlSession = Readonly<{ dispatch: (frame: Uint8Array, signal?: AbortSignal) => Promise<Uint8Array> }>;

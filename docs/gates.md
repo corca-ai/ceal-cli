@@ -5,11 +5,20 @@
 holds the reasons behind them: the things a rule cannot carry without becoming a
 paragraph, and that a future session will otherwise re-derive or undo.
 
-## Lint Rules That Are Off On Purpose
+## The Lint Gate, And What Its Config Pins
 
-`npm run lint` is `biome check .`: lint, format, and import order in one gate. It
-is `check` rather than `lint` deliberately, so an unformatted commit fails rather
-than merely drifting. `npm run lint:fix` applies every safe fix.
+`npm run lint` is `eslint .`, and `eslint.config.ts` is its single config: lint
+rules, formatting, and import order in one gate, so an unformatted commit fails
+rather than merely drifting. `npm run lint:fix` is `eslint . --fix` and applies
+every safe fix.
+
+It was `biome check .`. The swap is convergence rather than a comparison: the
+Gateway has run eslint since 2026-04-01 and `ceal-agent` picked it at its
+2026-08-11 baseline, while this repository ran no linter of any kind until
+2026-07-26 and picked biome then. That split was chronological, not a decision —
+no comparison of the two was ever recorded — and one linter across the three
+Ceal repositories is worth more than either tool's edge. Nothing here claims a
+performance difference in either direction; none was measured.
 
 `npm run lint:types` is the terminating source-only TypeScript gate. It runs three
 explicit owners: package source (`lint:types:packages`), tools and contract tests
@@ -79,8 +88,11 @@ index projection, so staged additions and deletions cannot be hidden by the
 working tree. Plain `npm run lint:import-hard-failures` is the retained-input
 mutation proof command.
 
-`biome.json` excludes the frozen `packages/ceal-protocol` deliberately. Do not
-widen its `includes` to lint code this lane may not edit.
+`eslint.config.ts` ignores the frozen `packages/ceal-protocol` deliberately, for
+the same reason `biome.json` excluded it: a lint finding there is one this lane
+may not act on, and "just fix the lint error" is how a frozen copy drifts. Do not
+narrow its `ignores` to lint code this lane may not edit.
+`packages/ceal-worker-cli/src/generated` stays ignored on the same list.
 
 The `check:unit` and `check` gates run only client/worker package tests and the
 explicit worker contract/release lists. The root npm workspace names exactly the
@@ -144,30 +156,69 @@ The signed Gateway Protocol source materializer is an explicit operator entry:
 Declaring it in the root manifest keeps production reachability honest; a
 test-only import is not evidence that an operator path can reach the command.
 
-`lineWidth` is 140 with tabs. That is this tree's existing shape, not a new house
-style being introduced.
+`biome check` carried three jobs in one command, and eslint core dropped
+formatting rules in v8.53, so two of them are a plugin each rather than a config
+line: `@stylistic/eslint-plugin` formats and `eslint-plugin-simple-import-sort`
+orders imports. Nothing was dropped. Losing either quietly while still calling
+the result one gate would have been a capability cut nobody asked for.
 
-Two rules remain disabled for reasons JSON cannot carry. `noNonNullAssertion` is
-enabled: indexed and map reads use an explicit guard or a runtime-checked
-optional access instead of a compile-only assertion. Check here before
-re-enabling either remaining rule:
+The `@stylistic` block is a 1:1 transcription of the deleted `biome.json` — tab
+indent, double quotes, always semicolons, trailing commas everywhere,
+always-parenthesised arrow parameters. That is this tree's existing shape, not a
+new house style being introduced: transcribed rather than re-chosen, because the
+tree is already formatted to those settings and any deviation shows up as a
+repo-wide diff that is churn rather than work.
 
-`suspicious/noExplicitAny` is enabled at error level. It is a native Biome
-diagnostic in the same `npm run lint` route; explicit `any` must be replaced by
-the actual shape, `unknown` plus a guard, or a typed adapter at the boundary.
+Two settings differ deliberately, and both differences come from the change of
+mechanism — `@stylistic` enforces the axes it has rules for, where a print
+formatter reprints from the AST:
 
-- `useTemplate` — every hit is `.join("\n") + "\n"`, which a template literal
-  makes worse, not better.
-- `noTemplateCurlyInString` — every hit is `${...}` inside a *shell* script
-  string, where it is the shell's own syntax and not a JS template.
+- `@stylistic/indent` sets `offsetTernaryExpressions: true`. Without it the rule
+  reported 470 findings; with it, 65. The remainder were TypeScript union-type
+  members, which `@stylistic` indents differently from biome.
+- `@stylistic/max-len` carries `tabWidth: 1`. The width itself is biome's 140,
+  unchanged, but the SCALE had to be transcribed too: the deleted `biome.json`
+  set `indentStyle: "tab"` with `indentWidth: 1`, so biome counted a tab as one
+  column, and `@stylistic` defaults to four. Measured on biome's own scale the
+  tree holds no line over 140. A first version of this rule missed that, read the
+  phantom violations as a real 141-148 residue, and raised the cap to 150 to
+  accommodate lines that were never that long.
 
-A rule with no findings does not belong in that list. Enable it instead —
-`useBiomeIgnoreFolder` sat in it undocumented while the list said "three", and
-its four findings were a fixable preference for `!**/dist` over `!**/dist/**`.
-The exclusion syntax moved and the rule is on; the count above is now true.
+`simple-import-sort` is configured as ONE group, so imports are sorted without
+gaining blank-line separators between them. Its default groups insert a blank
+line and biome's `organizeImports` did not; leaving the default turned the diff
+into mostly-inserted blank lines.
 
-`noRestrictedGlobals` is on for `**/*.mjs` only, denying `Response`, `Request`,
-`Headers`, `ReadableStream`, `WritableStream`, and `TransformStream`.
+Nothing is turned off. biome's recommended preset enabled two rules this tree
+disabled, and the readings are kept here because a future session will otherwise
+re-derive them: every `useTemplate` hit was `.join("\n") + "\n"`, which a
+template literal makes worse rather than better, and every
+`noTemplateCurlyInString` hit was `${...}` inside a *shell* script string, where
+it is the shell's own syntax and not a JS template. Neither rule's eslint
+counterpart is enabled by the sets this config extends, so there is no off-list
+to maintain — check those two readings before proposing either.
+
+`@typescript-eslint/no-explicit-any` is set to error, carrying biome's
+`suspicious/noExplicitAny`: explicit `any` must be replaced by the actual shape,
+`unknown` plus a guard, or a typed adapter at the boundary.
+
+`@typescript-eslint/no-unused-vars` carries `argsIgnorePattern`,
+`varsIgnorePattern` and `caughtErrorsIgnorePattern` of `^_`, because the `_`
+prefix is this tree's intentionally-unused marker. Without them the rule reports
+15 sites that are all convention, not defects.
+
+The switch reformatted about 150 files and surfaced five findings biome's
+recommended set did not report, all fixed rather than silenced: one empty
+interface that only extended its supertype, now a type alias; three `let`
+bindings a closure reads before assignment, kept as `let` under a targeted
+`eslint-disable-next-line prefer-const` with the reason written at the site; and
+one literal type annotation converted to an `as const` assertion. `eslint .`
+exits 0 over the whole repository.
+
+`no-restricted-globals` is on for `**/*.mjs` only, denying `Response`, `Request`,
+`Headers`, `ReadableStream`, `WritableStream`, and `TransformStream`. It was
+biome's `noRestrictedGlobals` override and is now the core rule — same six
+names, same reason.
 
 Read the reason it was added before deciding what to do with it, because that
 reason is gone. The Gateway lane used to mirror this source into a harness whose
@@ -360,15 +411,17 @@ TypeScript error first appeared at pre-push, after the commit that carried it ha
 already been written. `.githooks/pre-commit` closes that gap with the five checks
 that answer in seconds — `npm run lint`, `npm run lint:types`,
 `npm run lint:no-legacy-mjs`, the gate-contract readback, and `npm run lint:shell`
-— and with no test and no build. Measured together on a developer host: ~3s.
+— and with no test and no build. Measured together on a developer host at ~3s,
+but that figure was taken while `npm run lint` was biome and has not been
+re-measured since the swap.
 
 It is whole-repo, not changed-file, which is a deliberate reversal of what this
-document previously anticipated and the reason is measured rather than assumed.
-`biome check .` reads the whole tree in ~0.45s wall and the raw TypeScript compiler answers
-in ~1.6s, both on native engines; a staged-file selector would have to restate
-biome's include set and tsc's project graph to save a fraction of that, which is
-more code, a second place for the file set to drift, and no measurable win. Time
-the gates before revisiting the trade.
+document previously anticipated. Both halves read the whole tree: `eslint .`
+covers every `**/*.ts` and `**/*.mjs` outside its `ignores`, and the raw
+TypeScript compiler answers in ~1.6s on a native engine. A staged-file selector
+would have to restate the lint config's file set and tsc's project graph, which
+is more code and a second place for the file set to drift. The measurement that
+made that a clear trade was biome's; re-time both gates before revisiting it.
 
 Two things this tier is not. It does not replace pre-push or CI: it runs no
 suite, so a commit that passes here can still fail `npm run check:unit`. And it
@@ -784,9 +837,9 @@ earns its place:
   OpenSSL reads the signed Actions run identity from its certificate. They are
   not package runtime dependencies, and the bootstrap fails closed when either
   executable is absent.
-- `ignoreWorkspaces` carries `packages/ceal-protocol` for the same reason `biome`
-  excludes it: it is a frozen vendored copy, and a finding there is one no agent
-  may act on.
+- `ignoreWorkspaces` carries `packages/ceal-protocol` for the same reason
+  `eslint.config.ts` ignores it: it is a frozen vendored copy, and a finding
+  there is one no agent may act on.
 
 The findings it started with were 21, and reading them is what the tool is worth.
 `knip` reports a surplus `export` *modifier*, not unreachable code: suites import

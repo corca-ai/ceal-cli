@@ -1,4 +1,8 @@
 /* global process */
+import type { CealStableUpdateProgressStage, CealWorkerPlatform } from "../dist/cli-runtime.js";
+import { sha256 } from "../dist/sha256.js";
+import type { CealStableUpdateDeadlines } from "../dist/stable-update.js";
+import { createCealStableUpdateRunner } from "../dist/stable-update.js";
 import assert from "node:assert/strict";
 import { spawn } from "node:child_process";
 import {
@@ -16,10 +20,6 @@ import {
 import { tmpdir } from "node:os";
 import path from "node:path";
 import test, { type TestContext } from "node:test";
-import type { CealStableUpdateProgressStage, CealWorkerPlatform } from "../dist/cli-runtime.js";
-import { sha256 } from "../dist/sha256.js";
-import type { CealStableUpdateDeadlines } from "../dist/stable-update.js";
-import { createCealStableUpdateRunner } from "../dist/stable-update.js";
 
 test("stable updater only launches a current managed worker generation and reads back its replacement", async (context) => {
 	const root = mkdtempSync(path.join(tmpdir(), "ceal-stable-update-"));

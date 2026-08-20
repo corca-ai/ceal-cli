@@ -1,4 +1,3 @@
-import type { CealDeviceAdoptionClient } from "@corca-ai/ceal";
 import type { CealInstalledReleaseReading } from "./acceptance-record.js";
 import type { CealAgentAuditState, CealAgentSessionEventsLookup } from "./agent-audit.js";
 import type { CealAgentGuideHost, CealAgentGuideState } from "./agent-guide.js";
@@ -7,6 +6,7 @@ import type { CealStoredSession } from "./profile-store.js";
 import type { CealReceiptSpoolEntry, CealReceiptSpoolState } from "./receipt-spool.js";
 import type { CealSessionCommit } from "./session-replacement.js";
 import type { CealTimingRecorder } from "./timing.js";
+import type { CealDeviceAdoptionClient } from "@corca-ai/ceal";
 
 export interface CealCliIo {
 	stdout: { write(chunk: string): unknown };

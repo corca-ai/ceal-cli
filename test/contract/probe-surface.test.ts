@@ -1,15 +1,15 @@
+import { CEAL_AGENT_HOST_ENVIRONMENT_VARIABLES } from "../../packages/ceal-worker-cli/dist/agent-guide.js";
+import { CEAL_SUBCOMMANDS } from "../../packages/ceal-worker-cli/dist/subcommands.js";
+import { isAgentHostEnvironmentVariables, isSplitSubcommandResult, lookupProbeBinary } from "../../scripts/probe-surface-contract.ts";
+import { requiredCapture } from "../required.ts";
 import assert from "node:assert/strict";
-import { type SpawnSyncReturns, spawnSync } from "node:child_process";
+import { spawnSync,type SpawnSyncReturns } from "node:child_process";
 import { existsSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import process from "node:process";
 import test from "node:test";
 import { fileURLToPath } from "node:url";
-import { CEAL_AGENT_HOST_ENVIRONMENT_VARIABLES } from "../../packages/ceal-worker-cli/dist/agent-guide.js";
-import { CEAL_SUBCOMMANDS } from "../../packages/ceal-worker-cli/dist/subcommands.js";
-import { isAgentHostEnvironmentVariables, isSplitSubcommandResult, lookupProbeBinary } from "../../scripts/probe-surface-contract.ts";
-import { requiredCapture } from "../required.ts";
 
 // Contract tier, not release: this needs only `npm run build`, and the guard it
 // proves exists to stop a destructive probe — so the pre-push hook is exactly

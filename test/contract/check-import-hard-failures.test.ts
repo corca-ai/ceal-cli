@@ -1,12 +1,11 @@
+import { scanRepository } from "../../scripts/check-import-hard-failures.ts";
+import { required as requiredValue } from "../required.ts";
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import test from "node:test";
-
-import { scanRepository } from "../../scripts/check-import-hard-failures.ts";
-import { required as requiredValue } from "../required.ts";
 
 const ROOT = process.cwd();
 

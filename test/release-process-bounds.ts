@@ -1,13 +1,13 @@
-import assert from "node:assert/strict";
-import { spawnSync } from "node:child_process";
-import { constants as osConstants } from "node:os";
-import path from "node:path";
-import { fileURLToPath } from "node:url";
 import {
 	type BoundedProcessOptions,
 	type BoundedProcessResult,
 	runBoundedProcess,
 } from "../packages/ceal-worker-cli/src/bounded-process.ts";
+import assert from "node:assert/strict";
+import { spawnSync } from "node:child_process";
+import { constants as osConstants } from "node:os";
+import path from "node:path";
+import { fileURLToPath } from "node:url";
 
 export const RELEASE_TEST_PROCESS_TIMEOUT_MS = 120_000;
 

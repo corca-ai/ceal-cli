@@ -1,3 +1,6 @@
+import { permissionMode } from "./filesystem-mode.js";
+import { resolveAnchoredDirectory } from "./local-store-anchor.js";
+import { defaultMonotonicNow } from "./monotonic-clock.js";
 import { randomBytes } from "node:crypto";
 import {
 	closeSync,
@@ -14,9 +17,6 @@ import {
 	writeFileSync,
 } from "node:fs";
 import path from "node:path";
-import { permissionMode } from "./filesystem-mode.js";
-import { resolveAnchoredDirectory } from "./local-store-anchor.js";
-import { defaultMonotonicNow } from "./monotonic-clock.js";
 
 // The mutual exclusion every local store under HOME uses to make a
 // read-modify-write of its state file atomic across separate `ceal` processes.

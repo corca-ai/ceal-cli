@@ -1,10 +1,10 @@
+import { analyzeProductionReachability, productionEntries, workflowConsumers } from "../../scripts/lib/production-reachability.ts";
+import { scratchTree } from "../scratch-dir.ts";
 import assert from "node:assert/strict";
 import { mkdirSync } from "node:fs";
 import path from "node:path";
 import test, { type TestContext } from "node:test";
 import { fileURLToPath } from "node:url";
-import { analyzeProductionReachability, productionEntries, workflowConsumers } from "../../scripts/lib/production-reachability.ts";
-import { scratchTree } from "../scratch-dir.ts";
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..", "..");
 

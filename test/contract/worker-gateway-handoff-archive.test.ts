@@ -1,9 +1,3 @@
-import assert from "node:assert/strict";
-import { execFileSync } from "node:child_process";
-import { copyFileSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
-import { tmpdir } from "node:os";
-import path from "node:path";
-import test, { type TestContext } from "node:test";
 import { sha256 } from "../../packages/ceal-worker-cli/src/sha256.ts";
 import {
 	type ArchiveResolution,
@@ -13,6 +7,12 @@ import {
 	WorkerGatewayHandoffArchiveError,
 } from "../../scripts/worker-gateway-handoff-archive.ts";
 import { resolveWorkerReleaseInputsFromLockedGatewayArchive, WorkerReleaseInputError } from "../../scripts/worker-release-inputs.ts";
+import assert from "node:assert/strict";
+import { execFileSync } from "node:child_process";
+import { copyFileSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import path from "node:path";
+import test, { type TestContext } from "node:test";
 
 const LOCK_FILENAME = "gateway-protocol-handoff-lock.json";
 const ORIGIN = "https://ceal.borca.ai/releases/gateway-protocol-handoff";

@@ -36,14 +36,13 @@
 //   - `node -e` inline programs, which carry no script file to name.
 //   - bare shell scripts (`bash x.sh`, `./x.sh`).
 
+import { isJsonRecord as isRecord } from "../packages/ceal-worker-cli/src/json-record.ts";
+import { isMainModule } from "../scripts/lib/is-main-module.ts";
+import { required as requiredValue } from "./required.ts";
 import { existsSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { parse } from "yaml";
-
-import { isJsonRecord as isRecord } from "../packages/ceal-worker-cli/src/json-record.ts";
-import { isMainModule } from "../scripts/lib/is-main-module.ts";
-import { required as requiredValue } from "./required.ts";
 
 export const GATE_CONTRACT_SCHEMA = "ceal.gate_contract.v1";
 export const GATE_CONTRACT_PATH = "config/gate-contract.json";

@@ -1,14 +1,14 @@
+import { createCealDiscoveryCacheStore } from "../dist/discovery-cache.js";
+import { writeCealLocalStoreFile } from "../dist/local-store-file.js";
+import { createCealSessionStore } from "../dist/profile-store.js";
+import { createCealReceiptSpoolStore } from "../dist/receipt-spool.js";
+import type { CealReceiptSpoolEntry } from "../src/receipt-spool.js";
 import assert from "node:assert/strict";
 import { spawn } from "node:child_process";
 import { existsSync, mkdirSync, mkdtempSync, readdirSync, rmSync, statSync, utimesSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import test, { type TestContext } from "node:test";
-import { createCealDiscoveryCacheStore } from "../dist/discovery-cache.js";
-import { writeCealLocalStoreFile } from "../dist/local-store-file.js";
-import { createCealSessionStore } from "../dist/profile-store.js";
-import { createCealReceiptSpoolStore } from "../dist/receipt-spool.js";
-import type { CealReceiptSpoolEntry } from "../src/receipt-spool.js";
 
 const HOUR_MS = 60 * 60 * 1000;
 

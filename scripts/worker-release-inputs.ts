@@ -1,10 +1,5 @@
 #!/usr/bin/env node
 
-import { execFileSync } from "node:child_process";
-import { createHash } from "node:crypto";
-import { existsSync, lstatSync, readFileSync } from "node:fs";
-import path from "node:path";
-import { fileURLToPath } from "node:url";
 import { isJsonRecord } from "../packages/ceal-worker-cli/src/json-record.ts";
 import { sha256 } from "../packages/ceal-worker-cli/src/sha256.ts";
 import { sameStringArray as sameStrings } from "../packages/ceal-worker-cli/src/string-array.ts";
@@ -24,6 +19,11 @@ import {
 	consumeLockedGatewayHandoffArchiveSync,
 	WorkerGatewayHandoffArchiveError,
 } from "./worker-gateway-handoff-archive.ts";
+import { execFileSync } from "node:child_process";
+import { createHash } from "node:crypto";
+import { existsSync, lstatSync, readFileSync } from "node:fs";
+import path from "node:path";
+import { fileURLToPath } from "node:url";
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const INPUTS_FILENAME = "worker-release-inputs.json";
@@ -133,16 +133,16 @@ type ControlConformanceRecord = { filename: string; sha256: string; bytes: numbe
 type TrustAnchor =
 	| { kind: "caller_supplied_manifest_sha256"; value: string }
 	| {
-			kind: "reviewed_gateway_handoff_lock";
-			lock_filename: string;
-			gateway_repository: string;
-			gateway_commit: string;
-			gateway_tag: string;
-			actions_run_id: number;
-			origin: string;
-			archive_filename: string;
-			archive_sha256: string;
-	  };
+		kind: "reviewed_gateway_handoff_lock";
+		lock_filename: string;
+		gateway_repository: string;
+		gateway_commit: string;
+		gateway_tag: string;
+		actions_run_id: number;
+		origin: string;
+		archive_filename: string;
+		archive_sha256: string;
+	};
 type Resolution = {
 	schema_version: string;
 	ok: true;

@@ -5,9 +5,10 @@
 #
 # Most gates here are whole-repo rather than staged-scoped, which departs from the
 # "cheap changed-file signal" docs/gates.md anticipated. The reason is measured
-# on the host in hand, not assumed: `biome check .` reads the whole tree in
-# ~0.45s wall and the raw TypeScript compiler answers in ~1.6s, because both run on native
-# engines. A staged-file selector would have to restate biome's own include set
+# on the host in hand, not assumed: the raw TypeScript compiler answers in ~1.6s
+# on a native engine, and the linter reads the whole tree in the same order of
+# magnitude. The 0.45s figure this paragraph used to quote was biome's, measured
+# before the eslint migration; re-time it before leaning on it again. A staged-file selector would have to restate eslint's own include set
 # and tsc's project graph to save a fraction of that — more code, a second place
 # for the file set to drift, and no measurable win. Time the gates before
 # changing this trade; do not restore scoping on the strength of the word
@@ -41,7 +42,7 @@ run_gate() {
 	fi
 }
 
-run_gate "biome" npm run lint
+run_gate "eslint" npm run lint
 run_gate "raw TypeScript compiler" npm run lint:types
 run_gate "legacy .mjs ratchet" npm run lint:no-legacy-mjs
 run_gate "source NUL bytes" npm run lint:source-nul-bytes:staged

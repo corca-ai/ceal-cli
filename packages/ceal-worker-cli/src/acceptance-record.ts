@@ -15,11 +15,11 @@
 // that performs a real provider action as a side effect is how an "evidence
 // run" becomes an unlogged write; the bounded call stays `ceal call`, and this
 // command reads back the receipt of one that already happened.
-import { existsSync, readdirSync, readFileSync } from "node:fs";
-import path from "node:path";
 import { projectAcceptanceReceipt } from "./acceptance-receipt.js";
 import { type InstalledWorkerRelease, resolveInstalledWorkerRelease } from "./managed-worker-install.js";
 import { sha256 } from "./sha256.js";
+import { existsSync, readdirSync, readFileSync } from "node:fs";
+import path from "node:path";
 
 const MANIFEST_PREFIX = "ceal-worker-release-manifest-";
 const SUMS_NAME = "SHA256SUMS";

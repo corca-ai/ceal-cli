@@ -1,7 +1,7 @@
-import { CEAL_ENROLLMENT_EXCHANGE_SCHEMA, type CealEnrollmentResponse, decodeCealEnrollmentResponse } from "@corca-ai/ceal-protocol";
 import { CEAL_SESSION_CLIENT_TIMEOUT_MS, resolveRequestBounds } from "./request-bounds.js";
 import { decodeSessionProtocolResponse, exchangeSessionJson, resolveSessionEndpoint } from "./session-http-client.js";
 import { CEAL_CLIENT_VERSION } from "./version.js";
+import { CEAL_ENROLLMENT_EXCHANGE_SCHEMA, type CealEnrollmentResponse, decodeCealEnrollmentResponse } from "@corca-ai/ceal-protocol";
 
 export interface CealEnrollmentClient {
 	exchange(code: string): Promise<CealEnrollmentResponse>;

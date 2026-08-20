@@ -1,3 +1,5 @@
+import { runCealCommand } from "../../packages/ceal-worker-cli/dist/index.js";
+import { required as requiredValue,requiredCapture } from "../required.ts";
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
 import { existsSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
@@ -7,8 +9,6 @@ import process from "node:process";
 import test from "node:test";
 import { fileURLToPath } from "node:url";
 import { parseAllDocuments } from "yaml";
-import { runCealCommand } from "../../packages/ceal-worker-cli/dist/index.js";
-import { requiredCapture, required as requiredValue } from "../required.ts";
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..", "..");
 const BINARY_ROOT = existsSync(path.join(ROOT, "packages")) ? ROOT : path.resolve(ROOT, "..", "..");

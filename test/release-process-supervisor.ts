@@ -1,6 +1,6 @@
-import { readFileSync } from "node:fs";
 import { type BoundedProcessOptions, runBoundedProcess } from "../packages/ceal-worker-cli/src/bounded-process.ts";
 import { isMainModule } from "../scripts/lib/is-main-module.ts";
+import { readFileSync } from "node:fs";
 
 if (isMainModule(import.meta.url)) {
 	const payload = parsePayload(JSON.parse(readFileSync(0, "utf8")));

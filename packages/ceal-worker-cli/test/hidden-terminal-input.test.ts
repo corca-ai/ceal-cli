@@ -1,8 +1,8 @@
+import { readHiddenTerminalEnrollmentCode } from "../dist/hidden-terminal-input.js";
+import type { HiddenInputStatusStream, HiddenInputStream } from "../src/hidden-terminal-input.js";
 import assert from "node:assert/strict";
 import { Buffer } from "node:buffer";
 import test from "node:test";
-import { readHiddenTerminalEnrollmentCode } from "../dist/hidden-terminal-input.js";
-import type { HiddenInputStatusStream, HiddenInputStream } from "../src/hidden-terminal-input.js";
 
 type DataListener = (chunk: string | Buffer) => void;
 type EndListener = () => void;

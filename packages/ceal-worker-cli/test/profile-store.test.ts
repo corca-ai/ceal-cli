@@ -1,9 +1,9 @@
+import { CealSessionStoreError, type CealStoredSession, createCealSessionStore } from "../dist/profile-store.js";
 import assert from "node:assert/strict";
 import { chmodSync, mkdtempSync, readFileSync, rmSync, symlinkSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import test from "node:test";
-import { CealSessionStoreError, type CealStoredSession, createCealSessionStore } from "../dist/profile-store.js";
 
 const SESSION: CealStoredSession = {
 	gatewayEndpoint: "https://gateway.example.test/api/ceal/v1",

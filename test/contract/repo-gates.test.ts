@@ -1,12 +1,3 @@
-import assert from "node:assert/strict";
-import { execFileSync, spawnSync } from "node:child_process";
-import { chmodSync, cpSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
-import { tmpdir } from "node:os";
-import path from "node:path";
-import test from "node:test";
-import { fileURLToPath } from "node:url";
-import { parse as parseYaml } from "yaml";
-
 import { PASS_FAIL_ENV_KEYS, RUNNER_IDENTITY_ENV } from "../../scripts/lib/gate-attestation.ts";
 import {
 	collectViolations,
@@ -15,12 +6,20 @@ import {
 	fullGateInvocationSites,
 	fullGateViolations,
 	GATE_CONTRACT_SCHEMA,
-	main as gateContractMain,
 	hookRunnerViolations,
+	main as gateContractMain,
 	readContract,
 	writeDerivedContract,
 } from "../gate-contract-lib.ts";
-import { requiredCapture, required as requiredValue } from "../required.ts";
+import { required as requiredValue,requiredCapture } from "../required.ts";
+import assert from "node:assert/strict";
+import { execFileSync, spawnSync } from "node:child_process";
+import { chmodSync, cpSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import path from "node:path";
+import test from "node:test";
+import { fileURLToPath } from "node:url";
+import { parse as parseYaml } from "yaml";
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..", "..");
 const manifest = JSON.parse(readFileSync(path.join(ROOT, "package.json"), "utf8"));
@@ -420,11 +419,12 @@ test("both gates run the linter, and the final gate runs every suite", () => {
 	assert.match(manifest.scripts["check:unit"], /npm run lint/u);
 	assert.match(manifest.scripts.check, /npm run lint/u);
 	assert.match(manifest.scripts.check, /npm test/u);
-	// `biome check`, not `biome lint`: it also verifies formatting, so an
+	// `eslint`, run over the whole tree. Formatting travels in the same invocation
+	// rather than a second command: @stylistic carries it as rules, so an
 	// unformatted commit fails the gate instead of merely drifting. Two separate
-	// claims — the subcommand and the scope — rather than one exact string, so a
+	// claims — the binary and the scope — rather than one exact string, so a
 	// reporter or config flag is allowed but a narrowed scope is not.
-	assert.match(manifest.scripts.lint, /^biome check\b/u);
+	assert.match(manifest.scripts.lint, /^eslint\b/u);
 	assert.ok(manifest.scripts.lint.split(/\s+/u).includes("."), "the linter must run over the whole tree");
 	assert.doesNotMatch(manifest.scripts.lint, /--changed|--staged|--since/u);
 	assert.match(manifest.scripts.build, /npm run build:worker/u);
@@ -596,8 +596,8 @@ test("scripts/ is measured on the same terms as the two packages", () => {
 // no error and no diff a reader would read as a break.
 //
 // That happened on 2026-08-08 (`d8fc5fd`): 6 of 8 `@biomejs/cli-*` and 25 of 26
-// `@esbuild/*` entries left the lock, `biome check .` — the FIRST command of
-// `npm run check` — died on every non-arm64 runner, and five consecutive
+// `@esbuild/*` entries left the lock, the linter — then biome, the FIRST command
+// of `npm run check` — died on every non-arm64 runner, and five consecutive
 // `check.yml` runs failed. The release lane runs the same gate on `linux-amd64`
 // and `darwin-arm64`, so the next tag would have burned on two of three legs.
 //
@@ -654,28 +654,37 @@ test("the lockfile carries a toolchain for every platform the lanes run on", () 
 // edits in. Linting them would surface findings an agent cannot legally act on,
 // and the pressure to "just fix the lint error" is exactly how a frozen copy
 // drifts.
-test("the linter and formatter both run, and both exclude the frozen package", () => {
-	const biome = readJson<{
-		linter: { enabled: boolean };
-		formatter: { enabled: boolean; indentStyle: string; lineWidth: number };
-		files: { includes: string[] };
-	}>("biome.json");
-	assert.equal(biome.linter.enabled, true);
-	assert.equal(biome.formatter.enabled, true);
+test("the linter and formatter both run, and both exclude the frozen package", async () => {
+	// Asserted against the EFFECTIVE config eslint computes for a real file, not
+	// against the config file's text. That is what actually governs a run, and it
+	// removes the brittleness the biome version of this test recorded: it used to
+	// pin an exclusion's literal spelling, and a correct migration to the other
+	// spelling read as a removed exclusion.
+	const { ESLint } = await import("eslint");
+	const linter = new ESLint({ cwd: ROOT });
+	const config = await linter.calculateConfigForFile("packages/ceal-worker-cli/src/index.ts");
+
+	assert.ok(config.rules?.["@typescript-eslint/no-explicit-any"], "the linter must run");
 	// Tabs and a generous width are the existing tree's shape, not a new house
 	// style: a narrower width would rewrite far more than the long lines that
 	// motivated turning the formatter on.
-	assert.equal(biome.formatter.indentStyle, "tab");
-	assert.equal(biome.formatter.lineWidth, 140);
-	// The thing that must hold is that the frozen package is excluded, not which
-	// spelling biome prefers this year. Pinning the literal `!<path>/**` made a
-	// correct migration to `!<path>` — biome's own fixable preference — look like
-	// a removed exclusion.
+	assert.equal((config.rules?.["@stylistic/indent"] as unknown[])?.[1], "tab", "the formatter must run");
+	// The width AND the scale, because they were transcribed from a biome config
+	// that counted a tab as one column. Asserting the width alone let a first
+	// version of this rule run on @stylistic's default tabWidth of four, which
+	// invented violations and got the cap raised to accommodate them.
+	const maxLen = (config.rules?.["@stylistic/max-len"] as { code: number; tabWidth: number }[])?.[1];
+	assert.equal(maxLen?.code, 140);
+	assert.equal(maxLen?.tabWidth, 1);
+	// Imports are organised in the same run. biome's `check` did this and its
+	// `format` did not, so losing it would have been silent.
+	assert.ok(config.rules?.["simple-import-sort/imports"], "import order must be enforced");
+
+	// What must hold is that the frozen package is not linted — asked of eslint
+	// directly rather than by matching an ignore pattern.
 	const frozen = "packages/ceal-protocol";
-	assert.ok(
-		biome.files.includes.some((pattern: string) => pattern === `!${frozen}` || pattern === `!${frozen}/**`),
-		`biome.json must exclude the frozen package ${frozen}`,
-	);
+	assert.equal(await linter.isPathIgnored(`${frozen}/src/index.ts`), true, `${frozen} must be excluded`);
+	assert.equal(await linter.isPathIgnored("packages/ceal-worker-cli/src/index.ts"), false, "the linted tree must not be excluded");
 });
 
 test("TypeScript 7 owns the main type gate and TypeScript 6 remains an explicit compatibility diagnostic", () => {
@@ -856,7 +865,7 @@ test("no workflow run block reads a producer's output through a process substitu
 		true,
 	);
 	// An expansion in the arguments must not decide what the command is called.
-	assert.equal(lastCommand(`printf '%s' "\${expected[@]}"`), "printf");
+	assert.equal(lastCommand("printf '%s' \"${expected[@]}\""), "printf");
 	assert.equal(lastCommand("{ node -e 1"), "node");
 	assert.deepEqual(offenders, [], "a run block reads a process substitution and would lose the producer's exit status");
 });
@@ -1998,7 +2007,7 @@ test("the pre-commit hook is checked in and stays the cheap tier", () => {
 	// A negative control on that pattern: the gates the tier DOES run must not
 	// match it, or the assertion above would be vacuously satisfiable by removing
 	// everything.
-	assert.doesNotMatch('run_gate "biome" npm run lint\nrun_gate "types" npm run lint:types\n', heavy);
+	assert.doesNotMatch('run_gate "eslint" npm run lint\nrun_gate "types" npm run lint:types\n', heavy);
 	assert.match('run_gate "x" npm run test:unit\n', heavy, "the pattern must catch a suffixed test script");
 	assert.match('run_gate "x" npm run build:worker\n', heavy, "the pattern must catch a suffixed build script");
 	assert.match('run_gate "x" npm run check:unit\n', heavy, "the pattern must catch the iteration gate");
@@ -2040,7 +2049,7 @@ test("the pre-commit hook propagates the failing gate's exit code", (context) =>
 	// Not 1: a flattened code hides which gate failed and how.
 	const first = runHook(42, 0);
 	assert.equal(first.status, 42, "the gate's own exit code must reach git");
-	assert.match(first.stderr, /COMMIT BLOCKED by biome/u, "the hook must name the gate that blocked, not just fail");
+	assert.match(first.stderr, /COMMIT BLOCKED by eslint/u, "the hook must name the gate that blocked, not just fail");
 
 	// Failing the FIRST gate proves one `run_gate` line. The tier has six, and a
 	// later one written wrong would not be reached above, so fail a gate the hook

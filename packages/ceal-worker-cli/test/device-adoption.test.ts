@@ -1,6 +1,11 @@
-import assert from "node:assert/strict";
-import { createHash } from "node:crypto";
-import test from "node:test";
+import { required as requiredValue } from "../../../test/required.ts";
+import type { CealCliIo, CealCommandRuntime } from "../dist/cli-runtime.js";
+import { verifyCealDeviceProof } from "../dist/device-proof.js";
+import { sealCealHpkeMessage } from "../dist/hpke.js";
+import { runCealCommand } from "../dist/index.js";
+import type { CealStoredSession } from "../dist/profile-store.js";
+import { CealSessionStoreError } from "../dist/profile-store.js";
+import { createCealSessionCapability } from "../dist/session-capability.js";
 import type { CealDeviceAdoptionClient, CealPersonalClientSessionClient } from "@corca-ai/ceal";
 import {
 	CEAL_DEVICE_ENROLLMENT_APPROVAL_WAIT_FEATURE,
@@ -18,14 +23,9 @@ import {
 	deviceEnrollmentHpkeInfo,
 	deviceEnrollmentProofPayload,
 } from "@corca-ai/ceal-protocol";
-import { required as requiredValue } from "../../../test/required.ts";
-import type { CealCliIo, CealCommandRuntime } from "../dist/cli-runtime.js";
-import { verifyCealDeviceProof } from "../dist/device-proof.js";
-import { sealCealHpkeMessage } from "../dist/hpke.js";
-import { runCealCommand } from "../dist/index.js";
-import type { CealStoredSession } from "../dist/profile-store.js";
-import { CealSessionStoreError } from "../dist/profile-store.js";
-import { createCealSessionCapability } from "../dist/session-capability.js";
+import assert from "node:assert/strict";
+import { createHash } from "node:crypto";
+import test from "node:test";
 
 // The Gateway in these tests is a real sealer, not a stub that returns a
 // fixture: it opens the start request the command actually sent, seals a real
@@ -698,6 +698,9 @@ function createGateway(options: TestOptions): GatewayState {
 	let remaining = pendingPolls;
 	let approvalRemaining = approvalRequiredPolls;
 	let transientFailures = options.transientPollFailures ?? 0;
+	// The client methods below close over this and the state is installed after
+	// they are defined, so `const` is not expressible here.
+	// eslint-disable-next-line prefer-const
 	let gateway: GatewayState;
 
 	const client: CealDeviceAdoptionClient = {

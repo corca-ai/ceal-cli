@@ -1,11 +1,11 @@
-import { existsSync, readFileSync } from "node:fs";
-import path from "node:path";
-import { CEAL_PROTOCOL_VERSION, decodeCealClientResponse } from "@corca-ai/ceal-protocol";
 import { isJsonRecord } from "./json-record.js";
 import { writeCealLocalStoreFile } from "./local-store-file.js";
 import { prepareDirectory, removeOwnedFile, safeExistingFile } from "./local-store-guards.js";
 import { isCealSafeEndpoint } from "./safe-endpoint.js";
 import { isCealSafeRef } from "./safe-ref.js";
+import { CEAL_PROTOCOL_VERSION, decodeCealClientResponse } from "@corca-ai/ceal-protocol";
+import { existsSync, readFileSync } from "node:fs";
+import path from "node:path";
 
 // Client-local cache of the Gateway discovery catalog. This is the demand-side
 // half of the reconciling-store design: `ceal capabilities` costs ~6.3s almost

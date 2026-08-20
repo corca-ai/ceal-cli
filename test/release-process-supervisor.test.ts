@@ -1,6 +1,6 @@
+import { parsePayload } from "./release-process-supervisor.ts";
 import assert from "node:assert/strict";
 import test from "node:test";
-import { parsePayload } from "./release-process-supervisor.ts";
 
 const bounds = {
 	cwd: process.cwd(),

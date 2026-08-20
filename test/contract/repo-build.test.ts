@@ -1,3 +1,5 @@
+import { ensurePackageBuilt, processIsGone, REPO_ROOT } from "../repo-build.ts";
+import { scratchDir } from "../scratch-dir.ts";
 import assert from "node:assert/strict";
 import { spawn, spawnSync } from "node:child_process";
 import { chmodSync, existsSync, mkdirSync, readdirSync, readFileSync, statSync, utimesSync, writeFileSync } from "node:fs";
@@ -5,8 +7,6 @@ import path from "node:path";
 import process from "node:process";
 import test, { type TestContext } from "node:test";
 import { pathToFileURL } from "node:url";
-import { ensurePackageBuilt, processIsGone, REPO_ROOT } from "../repo-build.ts";
-import { scratchDir } from "../scratch-dir.ts";
 
 const HELPER = path.join(REPO_ROOT, "test", "repo-build.ts");
 const SUPERVISOR = path.join(REPO_ROOT, "test", "repo-build-supervisor.ts");

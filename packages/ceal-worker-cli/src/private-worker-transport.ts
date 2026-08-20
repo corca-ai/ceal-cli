@@ -271,6 +271,9 @@ export function postUnixSocket(
 	const body = Buffer.from(input.body, "utf8");
 	return new Promise((resolve, reject) => {
 		let settled = false;
+		// `finish` below closes over this and may run before the timer is armed, so
+		// the binding has to exist first; `const` is not expressible here.
+		// eslint-disable-next-line prefer-const
 		let deadline: ReturnType<typeof setTimeout> | undefined;
 		const finish = (action: () => void) => {
 			if (settled) return;
@@ -354,6 +357,9 @@ export function postUnixSocketStream(
 	return new Promise((resolve, reject) => {
 		let response: import("node:http").IncomingMessage | undefined;
 		let headersDelivered = false;
+		// `finish` below closes over this and may run before the timer is armed, so
+		// the binding has to exist first; `const` is not expressible here.
+		// eslint-disable-next-line prefer-const
 		let deadline: ReturnType<typeof setTimeout> | undefined;
 		let abortError: Error | undefined;
 		let deadlineError: Error | undefined;

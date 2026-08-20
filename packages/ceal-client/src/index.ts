@@ -1,21 +1,8 @@
-import type { CealGatewayRequestForInput, CealGatewayRequestInput, CealGatewayResponseFor } from "@corca-ai/ceal-protocol";
-import { CEAL_PROTOCOL_VERSION } from "@corca-ai/ceal-protocol";
 import type { CealClientTransport } from "./http-transport.js";
 import { CEAL_SAFE_REF } from "./safe-ref.js";
+import type { CealGatewayRequestForInput, CealGatewayRequestInput, CealGatewayResponseFor } from "@corca-ai/ceal-protocol";
+import { CEAL_PROTOCOL_VERSION } from "@corca-ai/ceal-protocol";
 
-export type {
-	CealClientFailure,
-	CealClientOperation,
-	CealClientRequest,
-	CealClientResponse,
-	CealClientSuccess,
-	CealGatewayRequest,
-	CealGatewayRequestForInput,
-	CealGatewayRequestInput,
-	CealGatewayResponseFor,
-	CealProofReferenceOrUnavailable,
-	CealProofUnavailable,
-} from "@corca-ai/ceal-protocol";
 export type {
 	CealDeviceAdoptionClient,
 	CreateCealDeviceAdoptionClientOptions,
@@ -57,6 +44,19 @@ export {
 	CealPersonalClientSessionError,
 	createCealPersonalClientSessionClient,
 } from "./personal-client-session-client.js";
+export type {
+	CealClientFailure,
+	CealClientOperation,
+	CealClientRequest,
+	CealClientResponse,
+	CealClientSuccess,
+	CealGatewayRequest,
+	CealGatewayRequestForInput,
+	CealGatewayRequestInput,
+	CealGatewayResponseFor,
+	CealProofReferenceOrUnavailable,
+	CealProofUnavailable,
+} from "@corca-ai/ceal-protocol";
 
 export interface CealClient {
 	request<I extends CealGatewayRequestInput>(input: Readonly<I>): Promise<CealGatewayResponseFor<CealGatewayRequestForInput<I>>>;

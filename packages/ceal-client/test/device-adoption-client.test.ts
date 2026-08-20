@@ -1,15 +1,15 @@
-import assert from "node:assert/strict";
-import type { IncomingMessage, ServerResponse } from "node:http";
-import { createServer } from "node:http";
-import test from "node:test";
+import { required as requiredValue } from "../../../test/required.ts";
+import { CealDeviceAdoptionClientError, createCealDeviceAdoptionClient } from "../src/index.ts";
+import { close, json, listen, readBody, serverPort } from "./client-response-test-support.ts";
 import {
 	CEAL_GATEWAY_DECODE_GENERATION_HEADER,
 	type CealDeviceEnrollmentPollRequest,
 	type CealDeviceEnrollmentStartRequest,
 } from "@corca-ai/ceal-protocol";
-import { required as requiredValue } from "../../../test/required.ts";
-import { CealDeviceAdoptionClientError, createCealDeviceAdoptionClient } from "../src/index.ts";
-import { close, json, listen, readBody, serverPort } from "./client-response-test-support.ts";
+import assert from "node:assert/strict";
+import type { IncomingMessage, ServerResponse } from "node:http";
+import { createServer } from "node:http";
+import test from "node:test";
 
 // Driven against a real loopback socket rather than an injected fetch, because
 // the failures worth catching here are transport failures: a redirect, a wrong

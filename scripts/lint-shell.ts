@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// `npm run lint` is `biome check .`, which sees no shell at all. That was fine
+// `npm run lint` is `eslint .`, which sees no shell at all. That was fine
 // while shell was incidental here. It is not incidental now: `install-ceal.sh`
 // is a signed release asset a customer executes, and `.githooks/pre-push` is the
 // last gate before a push — and a defect in the hook's own bookkeeping already
@@ -10,12 +10,12 @@
 // that no-ops on a host while claiming to have run is worse than one that says
 // it stood aside. That makes this maintainer-local enforcement; `AGENTS.md`
 // records it as such.
+import { exitWith } from "./lib/exit-with.ts";
 import { spawnSync } from "node:child_process";
 import { existsSync, readdirSync, statSync } from "node:fs";
 import path from "node:path";
 import process from "node:process";
 import { fileURLToPath } from "node:url";
-import { exitWith } from "./lib/exit-with.ts";
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 

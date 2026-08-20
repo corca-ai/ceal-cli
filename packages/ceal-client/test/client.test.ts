@@ -1,9 +1,9 @@
+import { type CealClientTransport, createCealClient } from "../src/index.ts";
+import type { CealGatewayRequest, CealGatewayResponseFor } from "@corca-ai/ceal-protocol";
 import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import test from "node:test";
 import { URL } from "node:url";
-import type { CealGatewayRequest, CealGatewayResponseFor } from "@corca-ai/ceal-protocol";
-import { type CealClientTransport, createCealClient } from "../src/index.ts";
 
 test("client adds the public protocol version without assuming a Gateway transport", async () => {
 	let observed: Readonly<CealGatewayRequest> | undefined;

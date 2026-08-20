@@ -1,18 +1,18 @@
-import assert from "node:assert/strict";
-import { mkdtemp, readFile, rm, stat } from "node:fs/promises";
-import { tmpdir } from "node:os";
-import { join } from "node:path";
-import test from "node:test";
-import {
-	CEAL_LEASED_CONSUMER_ATTACHMENT_STREAM_SAFETY_LIMITS,
-	type CealLeasedConsumerAttachmentStreamManifest,
-} from "@corca-ai/ceal-protocol";
 import {
 	CEAL_AGENT_ATTACHMENT_HANDOFF_MANIFEST_NAME,
 	CEAL_AGENT_ATTACHMENT_MATERIALIZATION_SCHEMA,
 	receiveLeasedConsumerAttachmentStream,
 } from "../dist/leased-consumer-attachment-stream.js";
 import { binding, chunked, completeManifest, document, image, streamBytes } from "./leased-consumer-attachment-stream-fixtures.ts";
+import {
+	CEAL_LEASED_CONSUMER_ATTACHMENT_STREAM_SAFETY_LIMITS,
+	type CealLeasedConsumerAttachmentStreamManifest,
+} from "@corca-ai/ceal-protocol";
+import assert from "node:assert/strict";
+import { mkdtemp, readFile, rm, stat } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import test from "node:test";
 
 type TestManifest = ReturnType<typeof completeManifest>;
 type TestPayload = readonly [slot: number, bytes: Uint8Array];
