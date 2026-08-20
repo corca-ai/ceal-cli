@@ -156,6 +156,16 @@ The signed Gateway Protocol source materializer is an explicit operator entry:
 Declaring it in the root manifest keeps production reachability honest; a
 test-only import is not evidence that an operator path can reach the command.
 
+The source-built Worker E2E lane is also explicitly paired when a local Gateway
+Protocol checkout is required: pass `--gateway-repo-root <gateway-repo-root>` to
+`npm run prove:source-e2e`. The lane validates the Gateway package identity and
+an existing, source-current `packages/ceal-protocol/dist`; if that dist is
+missing or stale it prints the owning package build command and does not build
+or copy it. Each Worker subprocess receives the repo-owned resolver hook, which
+maps only `@corca-ai/ceal-protocol` to that canonical dist. Without the option,
+the Worker keeps its frozen local Protocol dependency. This proves a bounded
+local source pair only and claims neither installed nor released parity.
+
 `biome check` carried three jobs in one command, and eslint core dropped
 formatting rules in v8.53, so two of them are a plugin each rather than a config
 line: `@stylistic/eslint-plugin` formats and `eslint-plugin-simple-import-sort`

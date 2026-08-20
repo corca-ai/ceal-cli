@@ -1,16 +1,168 @@
+import { resolvePairedProtocolSpecifier, resolvePairedSourceProtocol } from "../../scripts/paired-source-protocol-resolver.ts";
 import {
 	callRequestRef,
 	nextTargetCursor,
 	parseSourceWorkerE2eArgs,
 	sourceWorkerE2eHelp,
 	sourceWorkerE2ePlan,
+	sourceWorkerLaunchSpec,
 	summarizeHelp,
 	summarizeTimingStderr,
 	summarizeYaml,
 	targetRefReturned,
 } from "../../scripts/source-worker-e2e.ts";
 import assert from "node:assert/strict";
+import { spawnSync } from "node:child_process";
+import { mkdirSync, mkdtempSync, rmSync, unlinkSync, utimesSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import path from "node:path";
 import test from "node:test";
+
+function pairedGatewayFixture() {
+	const root = mkdtempSync(path.join(tmpdir(), "ceal-paired-protocol-"));
+	const packageRoot = path.join(root, "packages", "ceal-protocol");
+	const sourceRoot = path.join(packageRoot, "src");
+	const distRoot = path.join(packageRoot, "dist");
+	mkdirSync(sourceRoot, { recursive: true });
+	mkdirSync(distRoot, { recursive: true });
+	writeFileSync(
+		path.join(packageRoot, "package.json"),
+		JSON.stringify({ name: "@corca-ai/ceal-protocol", version: "9.9.9", type: "module", main: "./dist/index.js" }),
+	);
+	writeFileSync(path.join(sourceRoot, "index.ts"), "export const source = true;\n");
+	writeFileSync(path.join(sourceRoot, "conformance.ts"), "export const conformance = true;\n");
+	writeFileSync(path.join(distRoot, "index.js"), "export const source = true;\n");
+	writeFileSync(path.join(distRoot, "conformance.js"), "export const conformance = true;\n");
+	utimesSync(path.join(sourceRoot, "index.ts"), new Date(1_000), new Date(1_000));
+	utimesSync(path.join(sourceRoot, "conformance.ts"), new Date(1_000), new Date(1_000));
+	utimesSync(path.join(distRoot, "index.js"), new Date(2_000), new Date(2_000));
+	utimesSync(path.join(distRoot, "conformance.js"), new Date(2_000), new Date(2_000));
+	return { root, packageRoot, sourceRoot, distRoot };
+}
+
+test("source-worker-e2e keeps paired source off by default and names the frozen vendor", () => {
+	const options = parseSourceWorkerE2eArgs(["--plan"]);
+	assert.equal(options.gatewayRepoRoot, undefined);
+	const plan = sourceWorkerE2ePlan(options);
+	assert.deepEqual(plan.protocol_source, { mode: "frozen_local_vendor" });
+	assert.match(JSON.stringify(plan.non_claims), /installed or released parity/u);
+});
+
+test("source-worker-e2e fails closed for a malformed or missing paired Gateway root", () => {
+	const missing = resolvePairedSourceProtocol(path.join(tmpdir(), "ceal-paired-protocol-does-not-exist"));
+	assert.equal(missing.ok, false);
+	if (!missing.ok) assert.equal(missing.code, "gateway_repo_root_missing");
+	const { root, packageRoot } = pairedGatewayFixture();
+	try {
+		writeFileSync(
+			path.join(packageRoot, "package.json"),
+			JSON.stringify({ name: "not-the-protocol", version: "9.9.9", type: "module", main: "./dist/index.js" }),
+		);
+		const malformed = resolvePairedSourceProtocol(root);
+		assert.equal(malformed.ok, false);
+		if (!malformed.ok) {
+			assert.equal(malformed.code, "gateway_protocol_package_identity_mismatch");
+			assert.match(malformed.next_action, /npm --prefix/u);
+		}
+	} finally {
+		rmSync(root, { recursive: true, force: true });
+	}
+});
+
+test("source-worker-e2e refuses a stale paired dist with an actionable Gateway build", () => {
+	const { root, sourceRoot, distRoot } = pairedGatewayFixture();
+	try {
+		utimesSync(path.join(sourceRoot, "index.ts"), new Date(3_000), new Date(3_000));
+		utimesSync(path.join(distRoot, "conformance.js"), new Date(4_000), new Date(4_000));
+		const stale = resolvePairedSourceProtocol(root);
+		assert.equal(stale.ok, false);
+		if (!stale.ok) {
+			assert.equal(stale.code, "gateway_protocol_dist_stale");
+			assert.match(stale.next_action, /npm --prefix .*packages[\\/]ceal-protocol.* run build/u);
+			assert.match(stale.next_action, /does not build or copy/u);
+		}
+	} finally {
+		rmSync(root, { recursive: true, force: true });
+	}
+});
+
+test("source-worker-e2e rejects an incomplete paired dist before launching a Worker", () => {
+	const { root, distRoot } = pairedGatewayFixture();
+	try {
+		unlinkSync(path.join(distRoot, "conformance.js"));
+		const incomplete = resolvePairedSourceProtocol(root);
+		assert.equal(incomplete.ok, false);
+		if (!incomplete.ok) assert.equal(incomplete.code, "gateway_protocol_dist_stale");
+	} finally {
+		rmSync(root, { recursive: true, force: true });
+	}
+});
+
+test("source-worker-e2e composes paired Worker argv, env, and import-hook mapping", () => {
+	const { root, distRoot } = pairedGatewayFixture();
+	try {
+		const resolution = resolvePairedSourceProtocol(root);
+		assert.equal(resolution.ok, true);
+		if (!resolution.ok) return;
+		const launch = sourceWorkerLaunchSpec("/worker/dist/bin.js", ["capabilities", "--help"], "capabilities", resolution.protocol);
+		assert.equal(launch.command, process.execPath);
+		assert.deepEqual(launch.args.slice(0, 2), ["--import", path.resolve("scripts/paired-source-protocol-resolver.ts")]);
+		assert.deepEqual(launch.args.slice(2), ["/worker/dist/bin.js", "--timing", "capabilities", "--help"]);
+		assert.equal(launch.env.CEAL_PAIRED_SOURCE_PROTOCOL_DIST, distRoot);
+		assert.equal(launch.env.CEAL_PAIRED_SOURCE_PROTOCOL_DIST_SHA256, resolution.protocol.dist_sha256);
+		assert.equal(launch.env.CEAL_PAIRED_SOURCE_GATEWAY_ROOT, root);
+		assert.equal(launch.env.CEAL_PAIRED_SOURCE_PROTOCOL_LOADER, "1");
+		assert.equal(resolvePairedProtocolSpecifier("@corca-ai/ceal-protocol", distRoot), path.join(distRoot, "index.js"));
+		assert.equal(resolvePairedProtocolSpecifier("@corca-ai/not-protocol", distRoot), null);
+		assert.throws(() => resolvePairedProtocolSpecifier("@corca-ai/ceal-protocol/conformance", distRoot), /unsupported subpath/u);
+		assert.throws(() => resolvePairedProtocolSpecifier("@corca-ai/ceal-protocol/private", distRoot), /unsupported subpath/u);
+	} finally {
+		rmSync(root, { recursive: true, force: true });
+	}
+});
+
+test("source-worker-e2e child refuses dist bytes changed after parent validation", () => {
+	const { root, distRoot } = pairedGatewayFixture();
+	const workerEntrypoint = path.join(root, "worker.mjs");
+	try {
+		writeFileSync(workerEntrypoint, 'import { source } from "@corca-ai/ceal-protocol"; process.stdout.write(String(source));\n');
+		const resolution = resolvePairedSourceProtocol(root);
+		assert.equal(resolution.ok, true);
+		if (!resolution.ok) return;
+		const launch = sourceWorkerLaunchSpec(workerEntrypoint, [], "guide", resolution.protocol);
+		writeFileSync(path.join(distRoot, "index.js"), "export const source = false;\n");
+		const child = spawnSync(launch.command, launch.args, {
+			cwd: path.resolve("."),
+			encoding: "utf8",
+			env: { ...process.env, ...launch.env },
+		});
+		assert.notEqual(child.status, 0);
+		assert.match(child.stderr, /child validation does not match/u);
+	} finally {
+		rmSync(root, { recursive: true, force: true });
+	}
+});
+
+test("source-worker-e2e resolver hook loads the paired Protocol in a real child process", () => {
+	const { root } = pairedGatewayFixture();
+	const workerEntrypoint = path.join(root, "worker.mjs");
+	try {
+		writeFileSync(workerEntrypoint, 'import { source } from "@corca-ai/ceal-protocol"; process.stdout.write(JSON.stringify({ source }));\n');
+		const resolution = resolvePairedSourceProtocol(root);
+		assert.equal(resolution.ok, true);
+		if (!resolution.ok) return;
+		const launch = sourceWorkerLaunchSpec(workerEntrypoint, [], "guide", resolution.protocol);
+		const child = spawnSync(launch.command, launch.args, {
+			cwd: path.resolve("."),
+			encoding: "utf8",
+			env: { ...process.env, ...launch.env },
+		});
+		assert.equal(child.status, 0, child.stderr);
+		assert.deepEqual(JSON.parse(child.stdout), { source: true });
+	} finally {
+		rmSync(root, { recursive: true, force: true });
+	}
+});
 
 test("source-worker-e2e keeps the live lane explicitly opt-in and records session refresh separately", () => {
 	const options = parseSourceWorkerE2eArgs([

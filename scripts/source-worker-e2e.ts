@@ -9,6 +9,14 @@
 // own; the operator supplies values returned by live discovery.
 
 import { CEAL_SAFE_CURSOR } from "../packages/ceal-worker-cli/src/safe-ref.ts";
+import {
+	PAIRED_PROTOCOL_DIST_ENV,
+	PAIRED_PROTOCOL_DIST_SHA256_ENV,
+	PAIRED_PROTOCOL_GATEWAY_ROOT_ENV,
+	PAIRED_PROTOCOL_LOADER_ENV,
+	type PairedSourceProtocol,
+	resolvePairedSourceProtocol,
+} from "./paired-source-protocol-resolver.ts";
 import { spawn, spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
 import { existsSync, readFileSync } from "node:fs";
@@ -38,6 +46,7 @@ export type SourceWorkerE2eOptions = {
 	allowSessionRefresh: boolean;
 	allowProviderCall: boolean;
 	explicitSessionRefresh: boolean;
+	gatewayRepoRoot?: string;
 	boundaryReason?: string;
 	profile?: string;
 	capability?: string;
@@ -124,6 +133,13 @@ export function parseSourceWorkerE2eArgs(args: readonly string[]): SourceWorkerE
 			result.explicitSessionRefresh = true;
 			continue;
 		}
+		if (arg === "--gateway-repo-root") {
+			if (seen.has(arg)) throw new Error("--gateway-repo-root may be supplied once");
+			seen.add(arg);
+			result.gatewayRepoRoot = value(index, arg);
+			index += 1;
+			continue;
+		}
 		if (arg === "--boundary-reason") {
 			if (seen.has(arg)) throw new Error("--boundary-reason may be supplied once");
 			seen.add(arg);
@@ -202,6 +218,8 @@ export function sourceWorkerE2eHelp(): string {
 		"  --detail                     Include bounded command summaries and catalog counts.",
 		"  --fresh-discovery            Force the Worker catalog's existing --fresh live probe.",
 		"  --json                       Emit JSON instead of YAML.",
+		"  --gateway-repo-root <dir>    Pair Worker Protocol imports with this Gateway repo's existing dist.",
+		"                               Requires a fresh packages/ceal-protocol dist; never builds or copies it.",
 		"",
 		"Live boundary:",
 		"  --allow-live-gateway         Permit source Worker -> Gateway discovery.",
@@ -252,8 +270,42 @@ export function sourceWorkerE2ePlan(options: SourceWorkerE2eOptions): RecordValu
 		command: "source-worker-e2e",
 		status: "planned",
 		worker_entrypoint: "packages/ceal-worker-cli/dist/bin.js",
+		protocol_source: options.gatewayRepoRoot
+			? {
+					mode: "paired_gateway_source_dist",
+					gateway_repo_root: path.resolve(options.gatewayRepoRoot),
+					resolver: "scripts/paired-source-protocol-resolver.ts",
+					non_claims: ["This plan does not claim installed or released protocol parity."],
+				}
+			: { mode: "frozen_local_vendor" },
 		commands,
-		non_claims: ["No Gateway, session, provider, Slack, or receipt action was executed."],
+		non_claims: ["No Gateway, session, provider, Slack, or receipt action was executed.", "No installed or released parity is claimed."],
+	};
+}
+
+export type SourceWorkerLaunchSpec = {
+	command: string;
+	args: string[];
+	env: NodeJS.ProcessEnv;
+};
+
+export function sourceWorkerLaunchSpec(
+	workerEntrypoint: string,
+	workerArgs: readonly string[],
+	kind: string,
+	pairedProtocol?: PairedSourceProtocol,
+): SourceWorkerLaunchSpec {
+	const commandArgs = [...(TIMED_WORKER_COMMANDS.has(kind) ? ["--timing"] : []), ...workerArgs];
+	if (!pairedProtocol) return { command: process.execPath, args: [workerEntrypoint, ...commandArgs], env: {} };
+	return {
+		command: process.execPath,
+		args: ["--import", path.join(ROOT, "scripts", "paired-source-protocol-resolver.ts"), workerEntrypoint, ...commandArgs],
+		env: {
+			[PAIRED_PROTOCOL_DIST_ENV]: pairedProtocol.dist_root,
+			[PAIRED_PROTOCOL_DIST_SHA256_ENV]: pairedProtocol.dist_sha256,
+			[PAIRED_PROTOCOL_GATEWAY_ROOT_ENV]: pairedProtocol.gateway_repo_root,
+			[PAIRED_PROTOCOL_LOADER_ENV]: "1",
+		},
 	};
 }
 
@@ -366,10 +418,15 @@ function spawnSyncNode(command: string, args: readonly string[], timeout: number
 	};
 }
 
-async function runProcess(command: string, args: readonly string[], timeoutMs: number): Promise<CommandResult> {
+async function runProcess(
+	command: string,
+	args: readonly string[],
+	timeoutMs: number,
+	env: NodeJS.ProcessEnv = process.env,
+): Promise<CommandResult> {
 	const started = Date.now();
 	return new Promise((resolve) => {
-		const child = spawn(command, args, { cwd: ROOT, env: process.env, stdio: ["ignore", "pipe", "pipe"] });
+		const child = spawn(command, args, { cwd: ROOT, env: { ...process.env, ...env }, stdio: ["ignore", "pipe", "pipe"] });
 		let stdout = "";
 		let stderr = "";
 		let timedOut = false;
@@ -448,8 +505,50 @@ async function main(): Promise<number> {
 		process.stdout.write(`${sourceWorkerE2eHelp()}\n`);
 		return 0;
 	}
+	let pairedProtocol: PairedSourceProtocol | undefined;
+	if (options.gatewayRepoRoot !== undefined) {
+		const resolution = resolvePairedSourceProtocol(options.gatewayRepoRoot);
+		if (!resolution.ok)
+			return emit(
+				{
+					schema_version: "ceal.source_worker_e2e.v1",
+					command: "source-worker-e2e",
+					ok: false,
+					status: "paired_source_invalid",
+					protocol_source: {
+						mode: "paired_gateway_source_dist",
+						gateway_repo_root: path.resolve(options.gatewayRepoRoot),
+						validation: "failed",
+					},
+					error: { kind: resolution.code, message: resolution.message, next_action: resolution.next_action },
+					non_claims: ["No Worker, Gateway, session, or provider action was executed.", "No installed or released parity is claimed."],
+				},
+				options.json,
+			);
+		pairedProtocol = resolution.protocol;
+	}
 	if (options.plan) return emit(sourceWorkerE2ePlan(options), options.json);
 	const dirty = gitFact(["status", "--porcelain", "--untracked-files=no"]);
+	const protocolSource = pairedProtocol
+		? {
+				mode: "paired_gateway_source_dist",
+				package: pairedProtocol.package_name,
+				package_version: pairedProtocol.package_version,
+				gateway_repo_root: pairedProtocol.gateway_repo_root,
+				package_root: pairedProtocol.package_root,
+				dist_root: pairedProtocol.dist_root,
+				entrypoint: pairedProtocol.entrypoint,
+				dist_sha256: pairedProtocol.dist_sha256,
+				entrypoint_sha256: pairedProtocol.entrypoint_sha256,
+				source_commit: pairedProtocol.source_commit,
+				source_dirty: pairedProtocol.source_dirty,
+			}
+		: {
+				mode: "frozen_local_vendor",
+				package: "@corca-ai/ceal-protocol",
+				package_root: "packages/ceal-protocol",
+			};
+	const protocolNonClaim = "No installed or released protocol parity is claimed.";
 	const metadata = {
 		entrypoint: "packages/ceal-worker-cli/dist/bin.js",
 		entrypoint_sha256: existsSync(WORKER_ENTRYPOINT) ? sha256(WORKER_ENTRYPOINT) : null,
@@ -457,10 +556,15 @@ async function main(): Promise<number> {
 		source_tree: gitFact(["rev-parse", "HEAD^{tree}"]),
 		source_dirty: dirty === null ? null : dirty !== "",
 		home_mode: "current_process_HOME",
+		protocol_source: protocolSource,
+	};
+	const runWorker = (args: readonly string[], kind: string) => {
+		const launch = sourceWorkerLaunchSpec(WORKER_ENTRYPOINT, args, kind, pairedProtocol);
+		return runProcess(launch.command, launch.args, COMMAND_TIMEOUT_MS, launch.env);
 	};
 	if (options.doctor) {
 		const guide = existsSync(WORKER_ENTRYPOINT)
-			? await runProcess(process.execPath, [WORKER_ENTRYPOINT, "guide", "status"], COMMAND_TIMEOUT_MS)
+			? await runWorker(["guide", "status"], "guide")
 			: undefined;
 		return emit(
 			{
@@ -470,6 +574,7 @@ async function main(): Promise<number> {
 				status: !existsSync(WORKER_ENTRYPOINT) ? "build_required" : guide?.exit_code === 0 ? "ready" : "source_guide_unavailable",
 				source_worker: metadata,
 				...(guide === undefined ? {} : { guide: commandSummary(guide, "guide") }),
+				non_claims: [protocolNonClaim],
 				next_action: existsSync(WORKER_ENTRYPOINT)
 					? guide?.exit_code === 0
 						? "Run with --allow-live-gateway for an explicit live proof."
@@ -492,7 +597,7 @@ async function main(): Promise<number> {
 					status: "build_failed",
 					source_worker: { ...metadata, entrypoint_sha256: existsSync(WORKER_ENTRYPOINT) ? sha256(WORKER_ENTRYPOINT) : null },
 					commands,
-					non_claims: ["No Gateway or provider action was executed."],
+					non_claims: ["No Gateway or provider action was executed.", protocolNonClaim],
 				},
 				options.json,
 			);
@@ -511,7 +616,7 @@ async function main(): Promise<number> {
 					message: "Live discovery is disabled by default.",
 					next_action: "Pass --allow-live-gateway; add --allow-session-refresh --boundary-reason when the stored session may rotate.",
 				},
-				non_claims: ["No Gateway or provider action was executed."],
+				non_claims: ["No Gateway or provider action was executed.", protocolNonClaim],
 			},
 			options.json,
 		);
@@ -529,15 +634,12 @@ async function main(): Promise<number> {
 					message: "The source-built Worker entrypoint is missing.",
 					next_action: "Run npm run build:worker or pass --build.",
 				},
+				non_claims: [protocolNonClaim],
 			},
 			options.json,
 		);
 	const worker = (args: readonly string[], kind: string) =>
-		runProcess(
-			process.execPath,
-			[WORKER_ENTRYPOINT, ...(TIMED_WORKER_COMMANDS.has(kind) ? ["--timing"] : []), ...args],
-			COMMAND_TIMEOUT_MS,
-		).then((result) => {
+		runWorker(args, kind).then((result) => {
 			const summary = commandSummary(result, kind);
 			commands.push(summary);
 			return { result, summary };
@@ -562,7 +664,7 @@ async function main(): Promise<number> {
 					message: "The source-built Worker preflight did not prove the expected session-refresh declaration.",
 					next_action: "Inspect version, guide, session, and capabilities help before using the live lane.",
 				},
-				non_claims: ["No Gateway discovery or provider action was executed because source Worker preflight was not proven."],
+				non_claims: ["No Gateway discovery or provider action was executed because source Worker preflight was not proven.", protocolNonClaim],
 			},
 			options.json,
 		);
@@ -588,7 +690,7 @@ async function main(): Promise<number> {
 					message: "The source Worker declares refresh_if_needed for capabilities.",
 					next_action: "Pass --allow-session-refresh --boundary-reason <text> to authorize this live E2E run.",
 				},
-				non_claims: ["No Gateway discovery or provider action was executed because session refresh authorization was absent."],
+				non_claims: ["No Gateway discovery or provider action was executed because session refresh authorization was absent.", protocolNonClaim],
 			},
 			options.json,
 		);
@@ -633,7 +735,7 @@ async function main(): Promise<number> {
 							kind: "target_discovery_failed",
 							next_action: "Use the returned Gateway error and re-run target discovery only after its recovery instruction is satisfied.",
 						},
-						non_claims: ["No provider call was executed because target discovery failed."],
+						non_claims: ["No provider call was executed because target discovery failed.", protocolNonClaim],
 					},
 					options.json,
 				);
@@ -656,7 +758,7 @@ async function main(): Promise<number> {
 						kind: "target_not_returned",
 						next_action: "Use an opaque target_ref returned for this capability by the immediately preceding target discovery.",
 					},
-					non_claims: ["No provider call was executed because the supplied target was not returned by Gateway discovery."],
+					non_claims: ["No provider call was executed because the supplied target was not returned by Gateway discovery.", protocolNonClaim],
 				},
 				options.json,
 			);
@@ -695,6 +797,7 @@ async function main(): Promise<number> {
 			},
 			non_claims: [
 				"This is source-built local checkout evidence, not a signed release or installed-client proof.",
+				protocolNonClaim,
 				...(options.capability ? [] : ["No provider call was requested; no provider state is claimed."]),
 			],
 		},
