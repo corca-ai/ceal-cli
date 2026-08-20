@@ -2,6 +2,293 @@
 	"entries": [
 		{
 			"surface": "code",
+			"id": "007f09c8c0fc0190",
+			"class": "intentional",
+			"reviewed_at": "2026-08-20",
+			"note": "Fresh-eye review at f589a8f: Two legacy-MJS conversion tests prove different dynamic-reference refusals at test/source/legacy-mjs-conversion.test.ts:288-294 and :344-350. Their setup is independent refusal evidence, not a shared converter policy owner; retain as intentional. This disposition does not claim the duplicate is removed; it keeps the exact fingerprint visible and reopens when a semantic owner or bounded neutral helper is proved."
+		},
+		{
+			"surface": "code",
+			"id": "02553dc38ac38483",
+			"class": "intentional",
+			"reviewed_at": "2026-08-20",
+			"note": "Fresh-eye review at f589a8f: Agent-guide normal projection and integrity-failure projection have different failure boundaries. This is a re-key of the reviewed guide projection family; keep the integrity allowlist proof local rather than coupling the two paths. This disposition does not claim the duplicate is removed; it keeps the exact fingerprint visible and reopens when a semantic owner or bounded neutral helper is proved."
+		},
+		{
+			"surface": "code",
+			"id": "13b27bfef91f4db8",
+			"class": "intentional",
+			"reviewed_at": "2026-08-20",
+			"note": "Fresh-eye review at f589a8f: Import headers are repeated across independent contract tests after the ESLint/import re-layout. They contain no semantic fixture or policy owner; this is an intentional test-boundary re-key. This disposition does not claim the duplicate is removed; it keeps the exact fingerprint visible and reopens when a semantic owner or bounded neutral helper is proved."
+		},
+		{
+			"surface": "code",
+			"id": "1a8c130b18b4e257",
+			"class": "intentional",
+			"reviewed_at": "2026-08-20",
+			"note": "Fresh-eye review at f589a8f: Claude and Codex transcript collectors share ordinary collector scaffolding but own different directory grammars and ordering contracts. Existing reviewed family re-key; no common policy owner. This disposition does not claim the duplicate is removed; it keeps the exact fingerprint visible and reopens when a semantic owner or bounded neutral helper is proved."
+		},
+		{
+			"surface": "code",
+			"id": "1d33ba7f710da737",
+			"class": "intentional",
+			"reviewed_at": "2026-08-20",
+			"note": "Fresh-eye review at f589a8f: The two gitPaths helpers belong to independent standalone gates. A neutral scripts/lib helper is a bounded future Worker-quality candidate, but extracting it in this push would invent an owner across unrelated gate contracts; carry explicitly as debt. This disposition does not claim the duplicate is removed; it keeps the exact fingerprint visible and reopens when a semantic owner or bounded neutral helper is proved."
+		},
+		{
+			"surface": "code",
+			"id": "1f29b1148d0564aa",
+			"class": "intentional",
+			"reviewed_at": "2026-08-20",
+			"note": "Fresh-eye review at f589a8f: The two parseOptions helpers terminate different gate CLI grammars. A neutral parseRepoScanArgs-style helper is a bounded future candidate; no single policy owner is established in this push. This disposition does not claim the duplicate is removed; it keeps the exact fingerprint visible and reopens when a semantic owner or bounded neutral helper is proved."
+		},
+		{
+			"surface": "code",
+			"id": "2d10c6676b8641b3",
+			"class": "intentional",
+			"reviewed_at": "2026-08-20",
+			"note": "Fresh-eye review at f589a8f: Named-option parsing and profile-option parsing share loop shape but have different grammar and validation contracts. Keep their refusal behavior local. This disposition does not claim the duplicate is removed; it keeps the exact fingerprint visible and reopens when a semantic owner or bounded neutral helper is proved."
+		},
+		{
+			"surface": "code",
+			"id": "31d97f7dd9fa9382",
+			"class": "intentional",
+			"reviewed_at": "2026-08-20",
+			"note": "Fresh-eye review at f589a8f: Native-builder and release-installer YAML import headers are standalone-script boilerplate after import reordering, with separate release ownership. This disposition does not claim the duplicate is removed; it keeps the exact fingerprint visible and reopens when a semantic owner or bounded neutral helper is proved."
+		},
+		{
+			"surface": "code",
+			"id": "41201a9e385b253c",
+			"class": "intentional",
+			"reviewed_at": "2026-08-20",
+			"note": "Fresh-eye review at f589a8f: Pre-push concurrency and signal-cleanup tests spawn processes to prove different lock properties. Combining their setup would blur the property each test isolates. This disposition does not claim the duplicate is removed; it keeps the exact fingerprint visible and reopens when a semantic owner or bounded neutral helper is proved."
+		},
+		{
+			"surface": "code",
+			"id": "44f0bf5173906acf",
+			"class": "intentional",
+			"reviewed_at": "2026-08-20",
+			"note": "Fresh-eye review at f589a8f: Three standalone release scripts share executable import boilerplate only. Their release boundaries are independent and no semantic helper owner exists. This disposition does not claim the duplicate is removed; it keeps the exact fingerprint visible and reopens when a semantic owner or bounded neutral helper is proved."
+		},
+		{
+			"surface": "code",
+			"id": "4b6549e329c9a7bf",
+			"class": "intentional",
+			"reviewed_at": "2026-08-20",
+			"note": "Fresh-eye review at f589a8f: Injected runConsumer and production execFileSync are deliberately different test seams. A shared helper would hide the injection boundary that the tests prove. This disposition does not claim the duplicate is removed; it keeps the exact fingerprint visible and reopens when a semantic owner or bounded neutral helper is proved."
+		},
+		{
+			"surface": "code",
+			"id": "4dffc52fb9b4cb69",
+			"class": "intentional",
+			"reviewed_at": "2026-08-20",
+			"note": "Fresh-eye review at f589a8f: GatewaySessionObservation and its sanitized output projection must remain distinct allow-list boundaries; merging them risks leaking internal fields into an external record. This disposition does not claim the duplicate is removed; it keeps the exact fingerprint visible and reopens when a semantic owner or bounded neutral helper is proved."
+		},
+		{
+			"surface": "code",
+			"id": "5054b074c0e82827",
+			"class": "intentional",
+			"reviewed_at": "2026-08-20",
+			"note": "Fresh-eye review at f589a8f: Asset-compose and package-release CLI option parsing belong to different release boundaries. Shared option shape is not a shared policy. This disposition does not claim the duplicate is removed; it keeps the exact fingerprint visible and reopens when a semantic owner or bounded neutral helper is proved."
+		},
+		{
+			"surface": "code",
+			"id": "5ad4e7847d42ce0c",
+			"class": "intentional",
+			"reviewed_at": "2026-08-20",
+			"note": "Fresh-eye review at f589a8f: Raw bounded capability observation and sanitized bounded capability projection intentionally separate sensitive-field removal from internal observation. This disposition does not claim the duplicate is removed; it keeps the exact fingerprint visible and reopens when a semantic owner or bounded neutral helper is proved."
+		},
+		{
+			"surface": "code",
+			"id": "63b0be7483d74aab",
+			"class": "intentional",
+			"reviewed_at": "2026-08-20",
+			"note": "Fresh-eye review at f589a8f: Executable import headers in three independent gate scripts are standalone entrypoint boilerplate, not a shared execution policy. This disposition does not claim the duplicate is removed; it keeps the exact fingerprint visible and reopens when a semantic owner or bounded neutral helper is proved."
+		},
+		{
+			"surface": "code",
+			"id": "6d29c5a5ffe6237b",
+			"class": "intentional",
+			"reviewed_at": "2026-08-20",
+			"note": "Fresh-eye review at f589a8f: The two legacy-conversion contract tests have distinct fixture/proof setup for different rewrite behavior; shared shape is test evidence, not a reusable policy. This disposition does not claim the duplicate is removed; it keeps the exact fingerprint visible and reopens when a semantic owner or bounded neutral helper is proved."
+		},
+		{
+			"surface": "code",
+			"id": "6d2d9a9b188ab6d2",
+			"class": "intentional",
+			"reviewed_at": "2026-08-20",
+			"note": "Fresh-eye review at f589a8f: Legacy conversion fixtures prove different rewrite/refusal cases. Their repeated setup is local evidence and must not be collapsed into one generic proof. This disposition does not claim the duplicate is removed; it keeps the exact fingerprint visible and reopens when a semantic owner or bounded neutral helper is proved."
+		},
+		{
+			"surface": "code",
+			"id": "720bedbc3a438dc1",
+			"class": "intentional",
+			"reviewed_at": "2026-08-20",
+			"note": "Fresh-eye review at f589a8f: readFileOrNull/defaultReadFile are boundary-local helpers in two standalone gates. A small neutral helper is a future candidate, but ownership and error contracts are not yet equivalent. This disposition does not claim the duplicate is removed; it keeps the exact fingerprint visible and reopens when a semantic owner or bounded neutral helper is proved."
+		},
+		{
+			"surface": "code",
+			"id": "779a97feabd4d358",
+			"class": "intentional",
+			"reviewed_at": "2026-08-20",
+			"note": "Fresh-eye review at f589a8f: Two contract tests share import/root-resolution headers but assert separate contracts. Positive-control independence is intentional. This disposition does not claim the duplicate is removed; it keeps the exact fingerprint visible and reopens when a semantic owner or bounded neutral helper is proved."
+		},
+		{
+			"surface": "code",
+			"id": "78ca08b2e7876624",
+			"class": "intentional",
+			"reviewed_at": "2026-08-20",
+			"note": "Fresh-eye review at f589a8f: Probe-surface and one-fact-one-home tests share import headers while proving independent route/ownership contracts; keep the test boundaries explicit. This disposition does not claim the duplicate is removed; it keeps the exact fingerprint visible and reopens when a semantic owner or bounded neutral helper is proved."
+		},
+		{
+			"surface": "code",
+			"id": "7e9706278546ddd3",
+			"class": "intentional",
+			"reviewed_at": "2026-08-20",
+			"note": "Fresh-eye review at f589a8f: Worker binary, diagnostic record, and supported-target regexes are separate grammar owners. Similar syntax alone is not a shared fact. This disposition does not claim the duplicate is removed; it keeps the exact fingerprint visible and reopens when a semantic owner or bounded neutral helper is proved."
+		},
+		{
+			"surface": "code",
+			"id": "7eb04442069dc782",
+			"class": "intentional",
+			"reviewed_at": "2026-08-20",
+			"note": "Fresh-eye review at f589a8f: The repeated install-git-hooks invocation is the idempotence assertion itself. Removing it would erase the proof. This disposition does not claim the duplicate is removed; it keeps the exact fingerprint visible and reopens when a semantic owner or bounded neutral helper is proved."
+		},
+		{
+			"surface": "code",
+			"id": "804cbcffc649620f",
+			"class": "intentional",
+			"reviewed_at": "2026-08-20",
+			"note": "Fresh-eye review at f589a8f: json-record.ts and run-secretlint.ts share a record guard as a re-key/extension of the reviewed family. A neutral helper needs a separately owned slice; do not cross the secretlint boundary in this push. This disposition does not claim the duplicate is removed; it keeps the exact fingerprint visible and reopens when a semantic owner or bounded neutral helper is proved."
+		},
+		{
+			"surface": "code",
+			"id": "89914c0b83947508",
+			"class": "intentional",
+			"reviewed_at": "2026-08-20",
+			"note": "Fresh-eye review at f589a8f: The two CLI argv/main guards have different argument meanings and failure envelopes. Existing standalone CLI boilerplate remains intentional. This disposition does not claim the duplicate is removed; it keeps the exact fingerprint visible and reopens when a semantic owner or bounded neutral helper is proved."
+		},
+		{
+			"surface": "code",
+			"id": "9143da30182dc6b5",
+			"class": "intentional",
+			"reviewed_at": "2026-08-20",
+			"note": "Fresh-eye review at f589a8f: agent-guide host detection, narrowing, row lookup, and host projection are a re-key of the reviewed guide family; ownership remains the guide projection boundary. This disposition does not claim the duplicate is removed; it keeps the exact fingerprint visible and reopens when a semantic owner or bounded neutral helper is proved."
+		},
+		{
+			"surface": "code",
+			"id": "930949cb98fc60f8",
+			"class": "intentional",
+			"reviewed_at": "2026-08-20",
+			"note": "Fresh-eye review at f589a8f: Pre-push lock refused/accepted paths intentionally contrast two outcomes of the lock contract; the repeated call shape is the proof. This disposition does not claim the duplicate is removed; it keeps the exact fingerprint visible and reopens when a semantic owner or bounded neutral helper is proved."
+		},
+		{
+			"surface": "code",
+			"id": "9373cf1468a5c2f7",
+			"class": "intentional",
+			"reviewed_at": "2026-08-20",
+			"note": "Fresh-eye review at f589a8f: repo-gates pre-push and pre-commit fixtures assert different hook exit contracts. Shared fixture shape is not a common hook owner. This disposition does not claim the duplicate is removed; it keeps the exact fingerprint visible and reopens when a semantic owner or bounded neutral helper is proved."
+		},
+		{
+			"surface": "code",
+			"id": "94b9e7cf5e15a214",
+			"class": "intentional",
+			"reviewed_at": "2026-08-20",
+			"note": "Fresh-eye review at f589a8f: Independent domain regex checks have different grammar owners and fail-closed meanings; no safe shared policy was found. This disposition does not claim the duplicate is removed; it keeps the exact fingerprint visible and reopens when a semantic owner or bounded neutral helper is proved."
+		},
+		{
+			"surface": "code",
+			"id": "9698828aee3f2bf7",
+			"class": "intentional",
+			"reviewed_at": "2026-08-20",
+			"note": "Fresh-eye review at f589a8f: Archive path traversal and non-regular-entry checks are distinct fail-closed properties, even where archive listing code overlaps. A helper is deferred until one owner can preserve both proofs. This disposition does not claim the duplicate is removed; it keeps the exact fingerprint visible and reopens when a semantic owner or bounded neutral helper is proved."
+		},
+		{
+			"surface": "code",
+			"id": "aa360ef0445b8065",
+			"class": "intentional",
+			"reviewed_at": "2026-08-20",
+			"note": "Fresh-eye review at f589a8f: Observer forwarded-host rejection (403) and malformed drill-down rejection (404) are distinct protocol contracts with separate error vocabulary. This disposition does not claim the duplicate is removed; it keeps the exact fingerprint visible and reopens when a semantic owner or bounded neutral helper is proved."
+		},
+		{
+			"surface": "code",
+			"id": "a265ad79bec08de9",
+			"class": "intentional",
+			"reviewed_at": "2026-08-20",
+			"note": "Fresh-eye review at f589a8f: Standalone script/test import boilerplate re-keyed after the ESLint transition; no semantic owner is shared. This disposition does not claim the duplicate is removed; it keeps the exact fingerprint visible and reopens when a semantic owner or bounded neutral helper is proved."
+		},
+		{
+			"surface": "code",
+			"id": "aae03930380d2a95",
+			"class": "intentional",
+			"reviewed_at": "2026-08-20",
+			"note": "Fresh-eye review at f589a8f: Standalone script/test import boilerplate re-keyed after the ESLint transition; no semantic owner is shared. This disposition does not claim the duplicate is removed; it keeps the exact fingerprint visible and reopens when a semantic owner or bounded neutral helper is proved."
+		},
+		{
+			"surface": "code",
+			"id": "c45c8ef848f548e4",
+			"class": "intentional",
+			"reviewed_at": "2026-08-20",
+			"note": "Fresh-eye review at f589a8f: Consumer client-package and worker-package build verification have separate dependency/version owners; combining them would blur the trust boundary. This disposition does not claim the duplicate is removed; it keeps the exact fingerprint visible and reopens when a semantic owner or bounded neutral helper is proved."
+		},
+		{
+			"surface": "code",
+			"id": "ccbf9b6adbe69ff4",
+			"class": "intentional",
+			"reviewed_at": "2026-08-20",
+			"note": "Fresh-eye review at f589a8f: Legacy-MJS conversion dynamic-path proof is a distinct refusal case from the other conversion families; repeated setup preserves the case's evidence. This disposition does not claim the duplicate is removed; it keeps the exact fingerprint visible and reopens when a semantic owner or bounded neutral helper is proved."
+		},
+		{
+			"surface": "code",
+			"id": "cdf27be039c92821",
+			"class": "intentional",
+			"reviewed_at": "2026-08-20",
+			"note": "Fresh-eye review at f589a8f: Session-unavailable and pre-provider Gateway rejection have different lifecycle/error vocabulary; they are not one policy. This disposition does not claim the duplicate is removed; it keeps the exact fingerprint visible and reopens when a semantic owner or bounded neutral helper is proved."
+		},
+		{
+			"surface": "code",
+			"id": "d0f62eb2b580ad3d",
+			"class": "intentional",
+			"reviewed_at": "2026-08-20",
+			"note": "Fresh-eye review at f589a8f: Legacy-MJS rollback/reference proof is independent evidence for a different conversion failure; keep its fixture local. This disposition does not claim the duplicate is removed; it keeps the exact fingerprint visible and reopens when a semantic owner or bounded neutral helper is proved."
+		},
+		{
+			"surface": "code",
+			"id": "ea49d47b0019804e",
+			"class": "intentional",
+			"reviewed_at": "2026-08-20",
+			"note": "Fresh-eye review at f589a8f: Standalone script/test import boilerplate re-keyed by the ESLint transition; no common semantic owner. This disposition does not claim the duplicate is removed; it keeps the exact fingerprint visible and reopens when a semantic owner or bounded neutral helper is proved."
+		},
+		{
+			"surface": "code",
+			"id": "f24263ebb1629342",
+			"class": "intentional",
+			"reviewed_at": "2026-08-20",
+			"note": "Fresh-eye review at f589a8f: Standalone script/test import boilerplate re-keyed by the ESLint transition; no common semantic owner. This disposition does not claim the duplicate is removed; it keeps the exact fingerprint visible and reopens when a semantic owner or bounded neutral helper is proved."
+		},
+		{
+			"surface": "code",
+			"id": "f4c7eccaecb75555",
+			"class": "intentional",
+			"reviewed_at": "2026-08-20",
+			"note": "Fresh-eye review at f589a8f: repo-build lock race tests distinguish stale, reclaimed, and candidate invariants. Their process setup is the independent proof, not a reusable policy. This disposition does not claim the duplicate is removed; it keeps the exact fingerprint visible and reopens when a semantic owner or bounded neutral helper is proved."
+		},
+		{
+			"surface": "code",
+			"id": "febe108216ed1c2c",
+			"class": "intentional",
+			"reviewed_at": "2026-08-20",
+			"note": "Fresh-eye review at f589a8f: Standalone script/test import boilerplate re-keyed by the ESLint transition; no common semantic owner. This disposition does not claim the duplicate is removed; it keeps the exact fingerprint visible and reopens when a semantic owner or bounded neutral helper is proved."
+		},
+		{
+			"surface": "code",
+			"id": "fe7fa8f3ea66dc09",
+			"class": "intentional",
+			"reviewed_at": "2026-08-20",
+			"note": "Fresh-eye review at f589a8f: Legacy-MJS conversion reference proof is an independent refusal case with its own fixture and assertion boundary. This disposition does not claim the duplicate is removed; it keeps the exact fingerprint visible and reopens when a semantic owner or bounded neutral helper is proved."
+		},
+		{
+			"surface": "code",
 			"id": "f7c1d7bcf80fe9c3",
 			"class": "intentional",
 			"reviewed_at": "2026-08-18",
