@@ -60,7 +60,13 @@ import { createCealObserverServer, OBSERVER_DATA_SOURCES } from "./observer.js";
 import { writeYaml } from "./output.js";
 import type { CealStoredSession } from "./profile-store.js";
 import { callResultCarriesReceipt, receiptSpoolEntryFromCallResult } from "./receipt-spool.js";
-import { CEAL_SAFE_CURSOR, CEAL_SAFE_PROFILE_REF, CEAL_SAFE_REQUEST_ID, CEAL_SAFE_REQUEST_REF } from "./safe-ref.js";
+import {
+	CEAL_SAFE_CURSOR,
+	CEAL_SAFE_PROFILE_REF,
+	CEAL_SAFE_REQUEST_ID,
+	CEAL_SAFE_REQUEST_REF,
+	CEAL_SAFE_SLACK_JOIN_APPROVAL_REF,
+} from "./safe-ref.js";
 import { sessionIdentityDiscriminator } from "./session-identity.js";
 import { type CealSessionRenewalMode, requireCealCallRenewalMode, requireCealSessionRenewalMode } from "./session-renewal.js";
 import { type CealSubcommandDefinition, type CealSubcommandHandlers, resolveSubcommandRoute } from "./subcommands.js";
@@ -1562,6 +1568,8 @@ async function executeCall(
 			return writeCallUnavailable(error.code, io, initialSession, parsed, undefined, undefined, capabilityEffect);
 		const reason = error instanceof CealHttpTransportError ? error.code : "request_failed";
 		return writeCallUnavailable(reason, io, initialSession, parsed, requestId, record, capabilityEffect);
+	} finally {
+		if (parsed.approvalRef !== undefined) await runtime.invalidateDiscoveryCache?.().catch(() => undefined);
 	}
 	return writeCallCompleted(completed.value, completed.events, requestId, io, completed.session, parsed, record);
 }
@@ -1597,6 +1605,7 @@ function requestCapability(
 				target_ref: parsed.targetRef,
 				arguments: parsed.arguments,
 				purpose: parsed.purpose,
+				...(parsed.approvalRef === undefined ? {} : { approval_ref: parsed.approvalRef }),
 			},
 		}),
 	);
@@ -1631,12 +1640,14 @@ function parseCallOptions(options: readonly string[]): ParsedCallOptions {
 	if (options.length < 3 || options.length > 67) return { ok: false };
 	const capabilityId = options[0];
 	if (!validCapabilityId(capabilityId)) return { ok: false };
-	const parsed = parseNamedOptions(options.slice(1), new Set(["--target", "--profile"]), new Set());
+	const parsed = parseNamedOptions(options.slice(1), new Set(["--target", "--profile", "--approval-ref"]), new Set());
 	if (!parsed) return { ok: false };
 	const targetRef = parsed.values.get("--target");
 	if (!validTargetRef(targetRef)) return { ok: false };
 	const profileRef = parsed.values.get("--profile");
 	if (profileRef !== undefined && !isSafeProfileRef(profileRef)) return { ok: false };
+	const approvalRef = parsed.values.get("--approval-ref");
+	if (approvalRef !== undefined && !CEAL_SAFE_SLACK_JOIN_APPROVAL_REF.test(approvalRef)) return { ok: false };
 	const operands = parseKeyValueOperands(parsed.operands);
 	if (!operands) return { ok: false };
 	const arguments_ = Object.fromEntries(operands);
@@ -1646,6 +1657,7 @@ function parseCallOptions(options: readonly string[]): ParsedCallOptions {
 		targetRef,
 		arguments: arguments_,
 		...(profileRef ? { profileRef } : {}),
+		...(approvalRef ? { approvalRef } : {}),
 		purpose: `Invoke capability '${capabilityId}' for the current task.`,
 	};
 }

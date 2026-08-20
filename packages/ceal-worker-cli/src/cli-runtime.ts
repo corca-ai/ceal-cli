@@ -67,6 +67,8 @@ export interface CealCommandRuntime {
 	// probe). Present only when a home directory is available. See discovery-cache.ts.
 	loadDiscoveryCache?: () => Promise<CealDiscoveryCacheEntry | null>;
 	saveDiscoveryCache?: (entry: CealDiscoveryCacheEntry) => Promise<void>;
+	/** Drop the advisory catalog after an approved connector-scope mutation. */
+	invalidateDiscoveryCache?: () => Promise<void>;
 	// The agent host is the declared `guide register <host>` route token; `status`
 	// omits it and reads the default host projection plus every host's state.
 	inspectAgentGuide?: (agent?: CealAgentGuideHost) => CealAgentGuideState;

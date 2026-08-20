@@ -85,6 +85,9 @@ export const CEAL_SAFE_REQUEST_REF = safeRef("", 255);
 /** A target reference, which carries its kind in a literal prefix. */
 export const CEAL_SAFE_TARGET_REF = safeRef("target:", 119);
 
+/** One-shot Gateway-issued Slack public-join approval binding. */
+export const CEAL_SAFE_SLACK_JOIN_APPROVAL_REF = /^slack-join-approval:[a-f0-9-]{36}$/u;
+
 /** A profile reference, same shape with its own prefix. */
 export const CEAL_SAFE_PROFILE_REF = safeRef("profile:", 119);
 

@@ -12,7 +12,7 @@ import { SESSION_SETUP_NEXT_ACTION } from "./command-definitions.js";
 import { hasExactObjectKeys as hasExactOwnKeys } from "./object-keys.js";
 import { writeYaml } from "./output.js";
 import type { CealStoredSession } from "./profile-store.js";
-import { CEAL_SAFE_GATEWAY_CODE, containsCealCredential, isSafeGatewayProofRef } from "./safe-ref.js";
+import { CEAL_SAFE_GATEWAY_CODE, CEAL_SAFE_SLACK_JOIN_APPROVAL_REF, containsCealCredential, isSafeGatewayProofRef } from "./safe-ref.js";
 import { sameStringArray as hasExactStringValues } from "./string-array.js";
 
 interface ResultIo {
@@ -83,6 +83,7 @@ export interface CealParsedCapabilityCall {
 	arguments: Record<string, string | number>;
 	purpose: string;
 	profileRef?: string;
+	approvalRef?: string;
 }
 
 function emitCallResult(io: ResultIo, envelope: Record<string, unknown>, record: CealCallResultRecorder | undefined): number {
@@ -196,6 +197,7 @@ export function writeCallGatewayFailure(
 				kind: denial ? "authorization_denied" : failure.code,
 				message: failure.message,
 				next_action: failure.nextAction,
+				...(failure.approvalRef === undefined ? {} : { approval_ref: failure.approvalRef }),
 				// Present only when the Gateway supplied it, so absence stays a
 				// readable "the Gateway named no wait" rather than a zero an agent
 				// would pace against.
@@ -308,6 +310,7 @@ interface SafeGatewayFailure {
 	 * number or nothing, never a locally invented backoff.
 	 */
 	retryAfterMs?: number;
+	approvalRef?: string;
 }
 
 const GATEWAY_DENIAL_CODES = new Set([
@@ -317,6 +320,7 @@ const GATEWAY_DENIAL_CODES = new Set([
 	"target_catalog_capability_not_granted",
 ]);
 const GATEWAY_NON_DENIAL_CODES = new Set([
+	"approval_required",
 	"resource_not_available",
 	"continuation_not_available",
 	"invalid_arguments",
@@ -344,6 +348,7 @@ function gatewayFailureText(error: unknown, field: "message" | "next_action"): s
 interface SafeGatewayRecovery {
 	kind: string;
 	retryAfterMs?: number;
+	approvalRef?: string;
 }
 
 function gatewayFailureRecovery(error: unknown): SafeGatewayRecovery | null {
@@ -351,13 +356,22 @@ function gatewayFailureRecovery(error: unknown): SafeGatewayRecovery | null {
 	const recovery = (error as { recovery?: unknown }).recovery;
 	if (!isPlainRecord(recovery) || !Object.hasOwn(recovery, "kind")) return null;
 	const keys = Object.keys(recovery);
-	if (keys.some((key) => key !== "kind" && key !== "retry_after_ms")) return null;
+	if (keys.some((key) => key !== "kind" && key !== "retry_after_ms" && key !== "approval_ref")) return null;
 	const kind = (recovery as { kind?: unknown }).kind;
 	if (typeof kind !== "string" || !(CEAL_GATEWAY_RECOVERY_KINDS as readonly string[]).includes(kind)) return null;
-	if (!Object.hasOwn(recovery, "retry_after_ms")) return { kind };
+	const approvalRef =
+		Object.hasOwn(recovery, "approval_ref") &&
+		typeof (recovery as { approval_ref?: unknown }).approval_ref === "string" &&
+		CEAL_SAFE_SLACK_JOIN_APPROVAL_REF.test((recovery as { approval_ref: string }).approval_ref)
+			? (recovery as { approval_ref: string }).approval_ref
+			: Object.hasOwn(recovery, "approval_ref")
+				? null
+				: undefined;
+	if (approvalRef === null) return null;
+	if (!Object.hasOwn(recovery, "retry_after_ms")) return { kind, ...(approvalRef === undefined ? {} : { approvalRef }) };
 	const wait = (recovery as { retry_after_ms?: unknown }).retry_after_ms;
 	return typeof wait === "number" && Number.isSafeInteger(wait) && wait >= 0 && wait <= MAX_GATEWAY_RETRY_AFTER_MS
-		? { kind, retryAfterMs: wait }
+		? { kind, ...(approvalRef === undefined ? {} : { approvalRef }), retryAfterMs: wait }
 		: null;
 }
 
@@ -411,5 +425,6 @@ export function classifyGatewayFailure(error: unknown): SafeGatewayFailure {
 		nextAction: gatewayFailureText(safeError, "next_action") ?? GATEWAY_FALLBACK_NEXT_ACTION,
 		denial: gatewayFailureDenial(recovery, code),
 		...wait,
+		...(recovery?.approvalRef === undefined ? {} : { approvalRef: recovery.approvalRef }),
 	};
 }

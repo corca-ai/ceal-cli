@@ -87,6 +87,7 @@ export async function runPublicCli(args: readonly string[], timing?: CealTimingR
 				: {
 						loadDiscoveryCache: () => withCealTiming(timing, "discovery_cache_load", () => discoveryCache.load()),
 						saveDiscoveryCache: (entry: Parameters<NonNullable<CealCommandRuntime["saveDiscoveryCache"]>>[0]) => discoveryCache.save(entry),
+						invalidateDiscoveryCache: () => discoveryCache.remove(),
 					}),
 			...(agentGuide === undefined
 				? {}

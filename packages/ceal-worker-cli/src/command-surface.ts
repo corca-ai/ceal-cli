@@ -182,6 +182,7 @@ function commandHelpOptions(name: CealCommandDefinition["name"]): readonly strin
 			"  <capability-id>          Capability returned by 'ceal capabilities'.",
 			"  --target <target-ref>   Target reference returned by 'ceal capabilities'.",
 			"  --profile <profile-ref> Select one assigned Profile for this call without re-login.",
+			"  --approval-ref <ref>    Gateway-issued one-shot Slack public-join approval ref.",
 			"  key=value               Capability input; repeat only fields in the discovered input contract.",
 			"                          Gateway validates capability-specific grammar and current Profile scope.",
 		];

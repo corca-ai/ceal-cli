@@ -291,6 +291,7 @@ test("canonical registry is reachable through stable, read-only help", async () 
 	const callHelp = await run(["call", "--help"]);
 	assert.match(callHelp.stdout, /select a target for that same capability/u);
 	assert.match(callHelp.stdout, /Do not mix a target returned for another capability/u);
+	assert.match(callHelp.stdout, /--approval-ref <ref>/u);
 });
 
 // The guide tells an agent to descend into a route and read that leaf's four
@@ -3163,6 +3164,57 @@ test("a throttle carries the Gateway's own wait instead of making the caller gue
 		});
 		assert.equal(Object.hasOwn(rejected, "retryAfterMs"), false, `retry_after_ms ${JSON.stringify(bad)} must not render`);
 	}
+});
+
+test("a Slack public-join recovery carries only the exact opaque approval reference", () => {
+	const approvalRef = "slack-join-approval:123e4567-e89b-12d3-a456-426614174000";
+	assert.deepEqual(
+		classifyGatewayFailure({
+			code: "approval_required",
+			message: "safe",
+			next_action: "safe",
+			recovery: { kind: "request_approval", approval_ref: approvalRef },
+		}),
+		{ code: "approval_required", message: "safe", nextAction: "safe", denial: false, approvalRef },
+	);
+	assert.equal(
+		Object.hasOwn(
+			classifyGatewayFailure({
+				code: "approval_required",
+				message: "safe",
+				next_action: "safe",
+				recovery: { kind: "request_approval", approval_ref: "slack-join-approval:not-a-uuid" },
+			}),
+			"approvalRef",
+		),
+		false,
+	);
+
+	let stdout = "";
+	writeCallGatewayFailure(
+		{
+			error: {
+				code: "approval_required",
+				message: "safe",
+				next_action: "safe",
+				recovery: { kind: "request_approval", approval_ref: approvalRef },
+			},
+		},
+		{
+			stdout: {
+				write: (chunk) => {
+					stdout += String(chunk);
+				},
+			},
+		},
+		storedSession("http://127.0.0.1:1/gateway/client"),
+		{ ok: true, capabilityId: "message.create", targetRef: "target:slack:C0123456789", arguments: {}, purpose: "Create" },
+		"request:direct-slack-approval",
+	);
+	const payload = parseYaml(stdout);
+	assert.equal(payload.error.kind, "approval_required");
+	assert.equal(payload.error.approval_ref, approvalRef);
+	assert.doesNotMatch(JSON.stringify(payload.error), /C0123456789/u);
 });
 
 test("a Gateway-authored recovery preserves its exact bounded text", () => {
