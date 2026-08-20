@@ -22,8 +22,7 @@
 		"@secretlint/secretlint-rule-pattern",
 		"@secretlint/secretlint-rule-slack",
 		"postject",
-		"secretlint",
-		"tsx"
+		"secretlint"
 	],
 	"ignoreBinaries": ["nose", "shellcheck", "mkfifo", "cosign", "openssl", "awiki"]
 }
