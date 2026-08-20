@@ -78,11 +78,6 @@ export function readPolicy(policyPath: string): string[] {
 	return files;
 }
 
-export function trackedLegacyMjs(repoRoot: string, runGit: GitRunner = gitBytes): string[] {
-	const resolvedRoot = resolveRepoRoot(repoRoot, runGit);
-	return trackedLegacyMjsAtRoot(resolvedRoot, runGit);
-}
-
 function trackedLegacyMjsAtRoot(repoRoot: string, runGit: GitRunner): string[] {
 	const trackedCandidates = nulLines(runGit(["ls-files", "-z", "--cached", "--others", "--exclude-standard", "--", "*.mjs"], repoRoot));
 	trackedCandidates.forEach((file) => {

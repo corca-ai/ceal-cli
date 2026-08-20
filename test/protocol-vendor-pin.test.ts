@@ -1,6 +1,5 @@
 import { validateProtocolVendorPin } from "../scripts/verify-protocol-vendor-pin.ts";
 import assert from "node:assert/strict";
-import { execFileSync } from "node:child_process";
 import { readdirSync, readFileSync } from "node:fs";
 import path from "node:path";
 import test from "node:test";
@@ -10,7 +9,6 @@ const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 type GatewayHandoffLock = { gateway: { commit: string; protocol_tree: string } };
 type ProtocolVendorPin = {
 	source: { commit: string; tree: string };
-	test_support: { source_path: string; vendored_path: string; blob: string };
 	shipped: { lock_file: string; gateway_commit: string; status: string; protocol_tree: string };
 };
 
@@ -30,15 +28,9 @@ test("the vendored protocol copy matches its recorded Gateway source", () => {
 	assert.equal(result.diverged, false, "the vendored source commit must match the shipment lock");
 });
 
-test("the frozen Protocol suite's out-of-subtree helper matches its recorded owner blob", () => {
+test("the protocol pin carries only its owned identity surfaces", () => {
 	const pin = readPin();
-	assert.deepEqual(pin.test_support, {
-		source_path: "scripts/test-support/base64url.mjs",
-		vendored_path: "scripts/test-support/base64url.mjs",
-		blob: "76ed97276986f2416e7bed997f774b6b14fe8951",
-	});
-	const observed = execFileSync("git", ["hash-object", pin.test_support.vendored_path], { cwd: ROOT, encoding: "utf8" }).trim();
-	assert.equal(observed, pin.test_support.blob);
+	assert.deepEqual(Object.keys(pin).sort(), ["non_claims", "schema_version", "shipped", "source", "vendored_path"]);
 });
 
 test("the repository root carries exactly the one protocol handoff lock the pin names", () => {

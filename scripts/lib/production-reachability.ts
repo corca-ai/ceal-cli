@@ -36,7 +36,7 @@ type ModuleRecord = {
 type WorkflowConsumer = { workflow: string; target: string; names: string[]; namespace: boolean };
 type ReachabilityFinding = { file: string; symbol: string; line: number };
 type ReachabilityReport = { entries: string[]; reachable: string[]; unreachableFiles: string[]; findings: ReachabilityFinding[] };
-type ReachabilityOptions = { repoRoot: string; entries?: string[]; testOnlyFiles?: Set<string>; workflows?: WorkflowConsumer[] };
+type ReachabilityOptions = { repoRoot: string; entries?: string[]; workflows?: WorkflowConsumer[] };
 
 function parse(file: string, text: string): ts.SourceFile {
 	return ts.createSourceFile(file, text, ts.ScriptTarget.ESNext, true, file.endsWith(".ts") ? ts.ScriptKind.TS : ts.ScriptKind.JS);
@@ -221,7 +221,6 @@ export function analyzeProductionReachability({
 	repoRoot,
 	entries = productionEntries(repoRoot),
 	workflows = workflowConsumers(repoRoot),
-	testOnlyFiles = declaredTestOnlyFiles(repoRoot),
 }: ReachabilityOptions): ReachabilityReport {
 	const sourceWorkflows = workflows.map((consumer) => ({
 		...consumer,
@@ -283,7 +282,7 @@ export function analyzeProductionReachability({
 	};
 	walk(path.join(repoRoot, "scripts"));
 	const unreachableFiles = owned
-		.filter((absolute) => !reachable.has(absolute) && !testOnlyFiles.has(absolute))
+		.filter((absolute) => !reachable.has(absolute))
 		.map((absolute) => path.relative(repoRoot, absolute))
 		.sort();
 
@@ -322,15 +321,4 @@ export function analyzeProductionReachability({
 		unreachableFiles,
 		findings,
 	};
-}
-
-function declaredTestOnlyFiles(repoRoot: string): Set<string> {
-	try {
-		const pin = JSON.parse(readFileSync(path.join(repoRoot, "protocol-vendor-pin.json"), "utf8"));
-		const declared = pin?.test_support?.vendored_path;
-		if (declared !== "scripts/test-support/base64url.mjs") return new Set();
-		return new Set([path.join(repoRoot, declared)]);
-	} catch {
-		return new Set();
-	}
 }
