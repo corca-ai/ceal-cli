@@ -1,362 +1,198 @@
 #!/usr/bin/env node
 
-// `packages/ceal-protocol` is a frozen copy of a tree corca-ai/ceal owns, and
-// until this script existed nothing in the repository recorded which Gateway
-// commit it was copied from. That gap cost a session three separate times in one
-// day: the copy blocked the policy renderer, it split what the gate tests from
-// what a release ships, and a re-pull hours after a sync found it stale again.
-// All three times `npm run check` was green, because a green gate said nothing
-// about a directory whose only correctness claim is "identical to somewhere
-// else".
+// This file used to bind three identities because the Protocol arrived here as an
+// EDITABLE SOURCE TREE under `packages/ceal-protocol`, and a directory whose only
+// correctness claim is "identical to somewhere else" needs constant policing:
 //
-// So the pin names three identities and this validator binds them together:
+//   source   — the Gateway commit and protocol subtree the copy was taken from
+//   vendored — what `packages/ceal-protocol` actually hashed to right now
+//   shipped  — the protocol subtree inside the locked handoff archive
 //
-//   source   — the Gateway commit and protocol subtree this copy was taken from
-//   vendored — what `packages/ceal-protocol` actually hashes to right now
-//   shipped  — the protocol subtree inside the locked handoff archive that
-//              `gateway-protocol-handoff-lock.json` binds a release to consume
+// Policing it did not work. `a8b3b96` edited the copy to satisfy this repository's
+// own `noUncheckedIndexedAccess` ratchet — which swept a frozen tree in as authored
+// source — and in doing so forked `compareProtocolVersions` so that ragged version
+// arrays compared EQUAL here and by `?? 0` upstream. Two protocol negotiators, one
+// package name. The gate that would have refused it ran three tiers later, and the
+// pin sat red in every mode until this change.
 //
-// `source` vs `vendored` is the drift check, and it is fatal. `source` vs
-// `shipped` is the proof/ship divergence, and it is fatal too: the Gateway owner
-// ruled it ship-blocking for every worker release, acceptance packet, and claim
-// that a green protocol test proves shipped worker behavior. A divergence may
-// still be *declared*, which is what keeps `--development` motion legal, but a
-// declaration is a quarantine rather than a clearance. It stays bound to the
-// facts it was made about: re-sync the copy or bump the handoff lock and it
-// stops matching them and the gate fails for that reason instead. That expiry is
-// the property a comment in a document does not have.
+// So the copy is gone. The Protocol now arrives as `vendor/ceal-protocol/*.tgz`:
+// the exact signed artifact `gateway-protocol-handoff-lock.json` binds, installed
+// through `npm` by digest, carrying `dist` and `conformance` and no `src` at all.
+// What this file checks collapses accordingly, and the collapse is the point:
+//
+//   * There is no `source` vs `vendored` drift, because there is no second copy to
+//     drift. The bytes on disk are the published bytes or the digest disagrees.
+//   * There is no `vendored` vs `shipped` divergence, because what this repository
+//     tests IS what a release ships — the same archive, not a re-compilation of a
+//     tree that was once equal to it. `proof_shipment_protocol_divergence` is
+//     therefore unreachable rather than merely unobserved, and the `--development`
+//     escape hatch it justified is no longer a different answer.
+//   * `assume-unchanged`, `skip-worktree` and uncommitted-edit checks are gone. A
+//     content digest already answers what all three approximated, and answers it
+//     about the bytes rather than about what Git was told to believe.
+//   * But a digest over the working tree is silent on whether the working tree IS
+//     the repository, and that turned out to matter. `vendored_change_hidden` looked
+//     like it was about `assume-unchanged` and `skip-worktree`; its real subject was
+//     "Git has been told to believe something untrue about these bytes", and
+//     `.gitignore` is a third route to that state and the strongest one — it makes
+//     the file invisible rather than merely stale. This repository ignores `*.tgz`
+//     for `npm pack` output, a slash-free pattern matches at any depth, and the
+//     first version of this cutover therefore left the archive untracked with every
+//     local gate green. So one index question survives, below.
+//
+// The pin FILE is gone too. Every identity it recorded — producer commit, protocol
+// subtree, artifact digest, filename — is in the handoff lock, which came from the
+// signed archive rather than from an author. A second file restating them could
+// only ever agree or lie.
 //
 // Read `docs/gates.md` before trusting this further than it goes. It reaches no
-// remote, so it cannot see the copy falling behind its owner, and `source.commit`
-// is a recorded observation nothing here confirms. `shipped.protocol_tree` used
-// to be in that sentence too; the protocol-only handoff declares the producer's
-// protocol subtree and the lock records it, so it is cross-checked below — which
-// is a comparison of two local files, not a check against the archive.
+// remote: it proves that the artifact in `vendor/` is the one the lock names, not
+// that the lock still matches a live corca-ai/ceal.
 
 import { codedErrorClass } from "./lib/coded-error.ts";
 import { isGitObject } from "./lib/git-object.ts";
 import { isObjectRecord } from "./lib/package-bin.ts";
 import { execFileSync } from "node:child_process";
+import { createHash } from "node:crypto";
 import { existsSync, lstatSync, readFileSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
 const REPO_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
-const PIN_PATH = "protocol-vendor-pin.json";
-const SCHEMA = "ceal.protocol_vendor_pin.v1";
-const VENDORED_PATH = "packages/ceal-protocol";
-const SOURCE_REPOSITORY = "corca-ai/ceal";
 const LOCK_FILE = "gateway-protocol-handoff-lock.json";
-const QUARANTINE_RECORD = "docs/protocol-quarantine.md";
-type ProtocolVendorPinStatus = "agreed" | "diverged";
-
-interface ProtocolVendorPinSource {
-	readonly repository: typeof SOURCE_REPOSITORY;
-	readonly package_path: typeof VENDORED_PATH;
-	readonly commit: string;
-	readonly tree: string;
-}
-
-interface ProtocolVendorPinShipped {
-	readonly lock_file: typeof LOCK_FILE;
-	readonly status: ProtocolVendorPinStatus;
-	readonly gateway_commit: string;
-	readonly protocol_tree: string;
-	readonly reason?: string;
-	readonly disposition_owner?: string;
-	readonly disposition_request?: string;
-}
-
-interface ProtocolVendorPin {
-	readonly schema_version: typeof SCHEMA;
-	readonly vendored_path: typeof VENDORED_PATH;
-	readonly source: ProtocolVendorPinSource;
-	readonly shipped: ProtocolVendorPinShipped;
-	readonly non_claims: readonly string[];
-}
+const VENDOR_DIRECTORY = "vendor/ceal-protocol";
+const PROTOCOL_PACKAGE = "@corca-ai/ceal-protocol";
+const SHA256_PATTERN = /^[0-9a-f]{64}$/u;
 
 interface GatewayHandoffLock {
-	readonly gateway?: {
-		readonly commit?: unknown;
-		readonly protocol_tree?: unknown;
-	};
+	readonly gateway?: { readonly commit?: unknown; readonly protocol_tree?: unknown };
+	readonly protocol?: { readonly package?: unknown; readonly version?: unknown; readonly filename?: unknown; readonly sha256?: unknown };
 }
 
 interface ValidateProtocolVendorPinOptions {
 	readonly repoRoot?: string;
-	readonly pin?: unknown;
 	readonly lock?: GatewayHandoffLock;
-	readonly vendoredTree?: string;
-	readonly vendoredDirty?: readonly string[];
-	readonly vendoredHidden?: readonly string[];
-	readonly requestTracked?: boolean;
+	/** Injected so the falsification tests need no scratch tarball on disk. */
+	readonly artifactSha256?: string;
+	/** Injected so fixtures on a scratch root need not be Git work trees. */
+	readonly tracked?: boolean;
 }
 
 interface ProtocolVendorPinValidationResult {
-	readonly schema_version: typeof SCHEMA;
-	readonly vendored_path: typeof VENDORED_PATH;
-	readonly source: ProtocolVendorPinSource;
-	readonly vendored: { readonly tree: string };
-	readonly shipped: ProtocolVendorPinShipped;
-	readonly diverged: boolean;
+	readonly schema_version: "ceal.protocol_vendor_artifact.v1";
+	readonly source: { readonly repository: "corca-ai/ceal"; readonly commit: string; readonly protocol_tree: string };
+	readonly vendored: { readonly path: string; readonly sha256: string };
+	readonly shipped: { readonly lock_file: typeof LOCK_FILE; readonly package: string; readonly version: string; readonly filename: string };
 	readonly non_claims: readonly string[];
 }
-
-const STATUSES: ReadonlySet<ProtocolVendorPinStatus> = new Set(["agreed", "diverged"]);
 
 export const ProtocolVendorPinError = codedErrorClass("ProtocolVendorPinError");
 
 /**
- * Validates the vendored protocol pin against the working tree and the Gateway
- * handoff lock. Reads local files, the Git index, and the working tree — the
- * working tree deliberately, because a committed tree hash cannot see a
- * mid-sync edit. It never fetches, installs, or contacts a remote.
- *
- * Every observed input is injectable so the falsification tests can drive the
- * failure branches without constructing a scratch Git repository per case.
+ * Proves that the vendored Protocol artifact is the exact archive the Gateway
+ * handoff lock binds. Reads two local files and hashes one of them; it never
+ * fetches, installs, or contacts a remote.
  */
 export function validateProtocolVendorPin({
 	repoRoot = REPO_ROOT,
-	pin,
 	lock,
-	vendoredTree,
-	vendoredDirty,
-	vendoredHidden,
-	requestTracked,
+	artifactSha256,
+	tracked,
 }: ValidateProtocolVendorPinOptions = {}): ProtocolVendorPinValidationResult {
 	const root = path.resolve(repoRoot);
-	const candidate = pin ?? readJson(root, PIN_PATH, "invalid_protocol_vendor_pin");
-	assertPinShape(candidate);
-
-	const observedTree = vendoredTree ?? readVendoredTree(root, candidate.vendored_path);
-	if (observedTree !== candidate.source.tree) {
-		throw new ProtocolVendorPinError(
-			"vendored_tree_mismatch",
-			`${candidate.vendored_path} hashes to ${observedTree}, but the pin records ${candidate.source.tree}. ` +
-				"Either the copy was edited, or a sync landed without updating protocol-vendor-pin.json.",
-		);
-	}
-
-	// `git status` is not the whole story: `update-index --assume-unchanged` and
-	// `--skip-worktree` tell Git to stop looking at a file, and it then reports a
-	// modified frozen copy as clean while `HEAD:` still hashes to the pinned tree.
-	// Both checks above therefore pass over an edited copy. Whoever set the bit
-	// meant to, but the gate's answer has to describe the tree on disk rather than
-	// the tree Git was told to pretend it sees.
-	const hidden = vendoredHidden ?? readVendoredHidden(root, candidate.vendored_path);
-	if (hidden.length > 0) {
-		throw new ProtocolVendorPinError(
-			"vendored_change_hidden",
-			`${hidden.join(", ")} is marked assume-unchanged or skip-worktree, so Git would report an edited copy as clean. ` +
-				`Clear it with \`git update-index --no-assume-unchanged --no-skip-worktree -- ${candidate.vendored_path}\`.`,
-		);
-	}
-
-	// A committed tree hash cannot see an uncommitted edit, and an uncommitted
-	// edit to a frozen copy is exactly the shape of drift this guards.
-	const dirty = vendoredDirty ?? readVendoredDirty(root, candidate.vendored_path);
-	if (dirty.length > 0) {
-		throw new ProtocolVendorPinError(
-			"vendored_worktree_dirty",
-			`${candidate.vendored_path} has uncommitted changes (${dirty.join(", ")}); a frozen copy must match its recorded source exactly.`,
-		);
-	}
-
-	const lockValue = lock ?? readJson(root, candidate.shipped.lock_file, "invalid_gateway_handoff_lock");
-	const lockedCommit = lockValue?.gateway?.commit;
-	if (lockedCommit !== candidate.shipped.gateway_commit) {
-		throw new ProtocolVendorPinError(
-			"shipped_lock_mismatch",
-			`${candidate.shipped.lock_file} now binds Gateway commit ${lockedCommit}, but the pin was written about ` +
-				`${candidate.shipped.gateway_commit}. Re-check the proof/ship state and update the pin.`,
-		);
-	}
-
-	// The protocol-only handoff declares the producer's protocol subtree, so the
-	// lock carries it and `shipped.protocol_tree` stopped being a field the pin
-	// alone gets to write. Closing that is what removes the documented two-field
-	// forgery: forging `source.tree` alone already failed, and forging
-	// `shipped.protocol_tree` to match it used to pass. It cannot now, because the
-	// lock disagrees — and the lock's value came from a signed archive.
-	//
-	// Required, not conditional. Skipping the check when the lock omits the field
-	// would leave the forgery one deletion away: drop `gateway.protocol_tree` from
-	// the lock and the pin gets the last word again, with the gate still green.
-	// The pin's `shipped.lock_file` is constrained to the protocol handoff lock,
-	// whose shape always carries this, so a lock without it is malformed rather
-	// than an older variant to tolerate.
-	const lockedProtocolTree = lockValue?.gateway?.protocol_tree;
-	if (!isGitObject(lockedProtocolTree)) {
+	const lockValue = lock ?? readJson<GatewayHandoffLock>(root, LOCK_FILE, "invalid_gateway_handoff_lock");
+	const protocol = lockValue?.protocol;
+	if (
+		!isObjectRecord(protocol) ||
+		protocol.package !== PROTOCOL_PACKAGE ||
+		!isSemanticVersion(protocol.version) ||
+		protocol.filename !== `corca-ai-ceal-protocol-${protocol.version}.tgz` ||
+		!isSha256(protocol.sha256)
+	) {
 		throw new ProtocolVendorPinError(
 			"invalid_gateway_handoff_lock",
-			`${candidate.shipped.lock_file} does not bind a Gateway protocol subtree, so the pin's shipped.protocol_tree cannot be checked ` +
-				"against anything. A lock this gate cannot read is not a lock it may pass over.",
-		);
-	}
-	if (lockedProtocolTree !== candidate.shipped.protocol_tree) {
-		throw new ProtocolVendorPinError(
-			"shipped_lock_mismatch",
-			`${candidate.shipped.lock_file} binds protocol subtree ${lockedProtocolTree}, but the pin records ` +
-				`${candidate.shipped.protocol_tree}. The lock's value comes from the signed handoff, so the pin is the wrong one.`,
+			`${LOCK_FILE} does not bind a complete ${PROTOCOL_PACKAGE} artifact identity, so there is nothing to check the vendored archive against. ` +
+				"A lock this gate cannot read is not a lock it may pass over.",
 		);
 	}
 
-	// The divergence verdict is decided by `source.commit` against the lock's
-	// `gateway.commit`, not by the pin's own two tree fields. Both trees are
-	// author-written, so a verdict computed from them is a statement about the
-	// pin rather than a check of anything; `lock.gateway.commit` is the one
-	// identity here that the pin does not get to write. The residual limit is
-	// honest and worth stating: `source.commit` is still self-recorded, so this
-	// makes divergence detectable without making convergence observable.
-	const converged = candidate.source.commit === lockedCommit;
-	// The consistency check is deliberately one-directional. One Gateway commit
-	// has exactly one `packages/ceal-protocol` subtree, so a pin naming the same
-	// commit on both sides while recording two different trees is contradicting
-	// itself and no reader could tell which half to believe.
-	//
-	// The reverse is NOT a contradiction and must not be treated as one: two
-	// different Gateway commits can carry a byte-identical protocol subtree, and
-	// a pin recording that is being honest. Rejecting it would have made the only
-	// green pin one that records a false `source.commit` — the guard pressuring a
-	// falsification of its own authoritative field. That state is still not
-	// shippable, because the lock binds a different commit, but it fails as a
-	// divergence rather than as a lying pin.
-	if (converged && candidate.shipped.protocol_tree !== candidate.source.tree) {
+	// Required, not conditional, and read from the lock rather than from any
+	// author-writable file. These are the producer identities a release quotes; if
+	// the lock omits them the quote would be unsourced.
+	const gateway = lockValue?.gateway;
+	if (!isGitObject(gateway?.commit) || !isGitObject(gateway?.protocol_tree)) {
 		throw new ProtocolVendorPinError(
-			"invalid_protocol_vendor_pin",
-			`The pin names Gateway commit ${candidate.source.commit} on both sides but records two different protocol subtrees ` +
-				`(source.tree ${candidate.source.tree}, shipped.protocol_tree ${candidate.shipped.protocol_tree}). One commit has one subtree.`,
+			"invalid_gateway_handoff_lock",
+			`${LOCK_FILE} does not bind the producing Gateway commit and protocol subtree.`,
 		);
 	}
-	if (candidate.shipped.status === "agreed" && !converged) {
+
+	const vendoredPath = `${VENDOR_DIRECTORY}/${protocol.filename}`;
+	const observed = artifactSha256 ?? sha256File(assertRegularFile(root, vendoredPath, "vendored_artifact_missing"));
+	if (observed !== protocol.sha256) {
 		throw new ProtocolVendorPinError(
-			"undeclared_divergence",
-			// Name the two values the verdict was actually computed from. This said
-			// "two different trees" while `converged` compares commits, so a
-			// maintainer whose tag it blocked was sent to compare two fields that
-			// are equal in every pin this check passes.
-			"The pin claims the vendored and shipped protocol identities agree, but it records two different Gateway commits " +
-				`(source.commit ${candidate.source.commit}, ${candidate.shipped.lock_file} gateway.commit ${lockedCommit}).`,
+			"vendored_artifact_mismatch",
+			`${vendoredPath} hashes to ${observed}, but ${LOCK_FILE} binds ${protocol.sha256}. ` +
+				"The vendored archive is not the signed artifact this repository consumes. Re-acquire it with " +
+				"`npm run bootstrap:gateway-handoff -- --tag <tag>` rather than editing either file.",
 		);
 	}
-	if (candidate.shipped.status === "diverged") {
-		if (converged) {
-			throw new ProtocolVendorPinError(
-				"stale_divergence_record",
-				"The pin declares a proof/ship divergence that its own recorded trees say no longer exists; close the declaration.",
-			);
-		}
-		// A declaration whose quarantine record has been deleted or renamed is no
-		// longer a pointer to an open question, just an excuse. Existence alone is
-		// too weak: any path in the tree satisfies it, so the pin is bound to the
-		// one tracked record that owns this quarantine rather than arbitrary prose.
-		const request = candidate.shipped.disposition_request;
-		if (request !== QUARANTINE_RECORD) {
-			throw new ProtocolVendorPinError(
-				"stale_divergence_record",
-				`A divergence disposition must point at ${QUARANTINE_RECORD}; ${request} is some other file.`,
-			);
-		}
-		assertRegularFile(root, request, "stale_divergence_record");
-		if (!(requestTracked ?? isTracked(root, request))) {
-			throw new ProtocolVendorPinError(
-				"stale_divergence_record",
-				`${request} is not tracked in Git, so its quarantine record is not reviewable.`,
-			);
-		}
+
+	// The one question a digest cannot answer: are these bytes IN the repository? An
+	// untracked archive passes every check above and gives a clone nothing, which is
+	// not hypothetical — it is the state this cutover was in until a reviewer read
+	// `.gitignore`. Checked after the digest so that wrong bytes still report as wrong
+	// bytes rather than as a bookkeeping problem.
+	if (!(tracked ?? isTrackedInGit(root, vendoredPath))) {
+		throw new ProtocolVendorPinError(
+			"vendored_artifact_untracked",
+			`${vendoredPath} is not tracked by Git, so a clone of this branch would have no Protocol at all and` +
+				" 'npm ci' would fail on the 'file:' dependency before any gate ran. Look for a .gitignore pattern that " +
+				"swallows it — '*.tgz' matches at any depth — rather than forcing the add.",
+		);
 	}
 
 	return {
-		schema_version: candidate.schema_version,
-		vendored_path: candidate.vendored_path,
-		source: { ...candidate.source },
-		vendored: { tree: observedTree },
-		shipped: { ...candidate.shipped },
-		diverged: !converged,
-		non_claims: candidate.non_claims,
+		schema_version: "ceal.protocol_vendor_artifact.v1",
+		source: { repository: "corca-ai/ceal", commit: gateway.commit, protocol_tree: gateway.protocol_tree },
+		vendored: { path: vendoredPath, sha256: observed },
+		shipped: { lock_file: LOCK_FILE, package: protocol.package, version: protocol.version, filename: protocol.filename },
+		non_claims: [
+			"This binds local bytes to a local lock; it does not fetch, verify a signature, or prove anything about the live corca-ai/ceal remote.",
+			"The lock's own identities were established when the handoff was bootstrapped and signature-verified; this gate re-reads them rather than re-proving them.",
+			"Agreement is an artifact identity. It is not by itself a Worker package, native artifact, installation, or live Gateway action proof.",
+		],
 	};
 }
 
 /**
- * The ship gate. `validateProtocolVendorPin` answers "is this pin internally
- * honest", which stays true of a correctly declared divergence — that is what
- * lets development continue on the synced decoder. This answers the different
- * question a release must ask: may these bytes be shipped at all.
+ * The ship gate, kept as a distinct entry point because three release scripts call
+ * it by this name -- `worker-release-inputs.ts`, `worker-acceptance-packet.ts` and
+ * `build-worker-release-assets.ts` -- and a release must ask its own question rather
+ * than trust that some check ran.
  *
- * The Gateway owner's decision makes the divergence ship-blocking for every
- * worker release, installed-acceptance packet, and claim that a green protocol
- * test proves shipped worker behavior. A declaration is a quarantine, not a
- * clearance, so every one of those paths calls this rather than trusting that
- * some test command ran.
+ * It no longer has a second question to ask. While the Protocol was a source copy,
+ * "is this pin honest" and "may these bytes ship" could differ, and a declared
+ * divergence was a quarantine rather than a clearance. Consuming the signed archive
+ * directly collapses the two: the artifact that passes above IS the artifact a
+ * release consumes.
+ *
+ * The result no longer carries a `diverged` field. It was kept for one revision on
+ * the stated grounds that release paths read it; they do not — all three call this
+ * and discard the result. Its type was the literal `false`, so the assertions over it
+ * could not fail and were guaranteed by the compiler rather than by behaviour. A
+ * field nothing reads, whose only possible value is asserted by three tests that
+ * cannot go red, is scaffolding.
  */
 export function assertShippableProtocolVendorPin(options: ValidateProtocolVendorPinOptions = {}): ProtocolVendorPinValidationResult {
-	const result = validateProtocolVendorPin(options);
-	if (!result.diverged) return result;
-	throw new ProtocolVendorPinError(
-		"proof_shipment_protocol_divergence",
-		`The vendored protocol copy was taken from Gateway commit ${result.source.commit}, but ${result.shipped.lock_file} binds ` +
-			`${result.shipped.gateway_commit} for shipment. What this repository tests is not what a release would ship, so this is ` +
-			"not a releasable worker input. Consume a Gateway artifact whose lock and pin name the same commit, or stop at " +
-			"development-only proof (`npm run check:protocol-dev`). This is refused even when the two commits carry a byte-identical " +
-			"protocol subtree: nothing here can verify that claim, and the lock is what a release actually consumes.",
-	);
+	return validateProtocolVendorPin(options);
 }
 
-function assertPinShape(pin: unknown): asserts pin is ProtocolVendorPin {
-	if (!isObjectRecord(pin) || pin.schema_version !== SCHEMA || pin.vendored_path !== VENDORED_PATH) {
-		throw new ProtocolVendorPinError("invalid_protocol_vendor_pin", "Protocol vendor pin is missing or does not match its schema.");
-	}
-	const source = pin.source;
-	if (!isProtocolVendorPinSource(source)) {
-		throw new ProtocolVendorPinError("invalid_protocol_vendor_pin", "Protocol vendor pin does not record a complete source identity.");
-	}
-	const shipped = pin.shipped;
-	if (!isProtocolVendorPinShipped(shipped)) {
-		throw new ProtocolVendorPinError("invalid_protocol_vendor_pin", "Protocol vendor pin does not record a complete shipped identity.");
-	}
-	// Only demanded for a divergence: an `agreed` pin has no open question to
-	// point at, and requiring an owner there would invite a placeholder.
-	if (
-		shipped.status === "diverged" &&
-		(!isNonEmptyString(shipped.reason) || !isNonEmptyString(shipped.disposition_owner) || !isNonEmptyString(shipped.disposition_request))
-	) {
-		throw new ProtocolVendorPinError(
-			"invalid_protocol_vendor_pin",
-			"A declared proof/ship divergence must name its reason, its disposition owner, and its quarantine record.",
-		);
-	}
-	if (!Array.isArray(pin.non_claims) || pin.non_claims.length === 0 || !pin.non_claims.every(isNonEmptyString)) {
-		throw new ProtocolVendorPinError("invalid_protocol_vendor_pin", "Protocol vendor pin must carry its non-claims.");
-	}
-}
-
-function readVendoredTree(root: string, vendoredPath: string): string {
-	return git(root, ["rev-parse", `HEAD:${vendoredPath}`], "the vendored protocol tree hash");
-}
-
-// `git ls-files -v` prefixes each path with its index state. A lowercase letter
-// means assume-unchanged; `S` means skip-worktree. Anything else is a file Git is
-// still watching.
-function readVendoredHidden(root: string, vendoredPath: string): string[] {
-	return git(root, ["ls-files", "-v", "--", vendoredPath], "the vendored protocol index flags")
-		.split("\n")
-		.map((line) => line.trim())
-		.filter(Boolean)
-		.filter((line) => {
-			const marker = line[0];
-			return marker !== undefined && (marker === "S" || (marker >= "a" && marker <= "z"));
-		})
-		.map((line) => line.slice(1).trim());
-}
-
-function readVendoredDirty(root: string, vendoredPath: string): string[] {
-	return git(root, ["status", "--porcelain", "--", vendoredPath], "the vendored protocol worktree status")
-		.split("\n")
-		.map((line) => line.trim())
-		.filter(Boolean);
-}
-
-function isTracked(root: string, relativePath: string): boolean {
+// `--error-unmatch` makes an untracked path an error rather than empty output, so
+// the verdict is an exit status and not a string comparison. A repoRoot that is not a
+// Git work tree at all also lands here as "not tracked", which is the honest answer
+// for a gate whose whole question is what a clone would receive.
+function isTrackedInGit(root: string, relativePath: string): boolean {
 	try {
 		execFileSync("git", ["ls-files", "--error-unmatch", "--", relativePath], { cwd: root, stdio: "ignore" });
 		return true;
@@ -365,18 +201,8 @@ function isTracked(root: string, relativePath: string): boolean {
 	}
 }
 
-// Deliberately not "this needs a Git work tree": a work tree with no commits yet
-// fails here too, and blaming the wrong thing sends the reader looking for a
-// missing repository that is right in front of them.
-function git(root: string, args: readonly string[], what: string): string {
-	try {
-		return execFileSync("git", args, { cwd: root, encoding: "utf8", stdio: ["ignore", "pipe", "ignore"] }).trim();
-	} catch {
-		throw new ProtocolVendorPinError(
-			"git_identity_failed",
-			`Git could not report ${what}. This check needs a Git work tree with at least one commit, run from the repository that owns ${VENDORED_PATH}.`,
-		);
-	}
+function sha256File(file: string): string {
+	return createHash("sha256").update(readFileSync(file)).digest("hex");
 }
 
 function readJson<T>(root: string, relativePath: string, code: string): T {
@@ -389,64 +215,46 @@ function readJson<T>(root: string, relativePath: string, code: string): T {
 }
 
 function assertRegularFile(root: string, relativePath: string, code: string): string {
-	if (typeof relativePath !== "string" || relativePath.length === 0 || path.isAbsolute(relativePath)) {
-		throw new ProtocolVendorPinError(code, "Protocol vendor pin paths must be non-empty relative paths.");
-	}
 	const target = path.resolve(root, relativePath);
-	if (!target.startsWith(`${root}${path.sep}`))
-		throw new ProtocolVendorPinError(code, "Protocol vendor pin path escaped the repository root.");
+	if (!target.startsWith(`${root}${path.sep}`)) throw new ProtocolVendorPinError(code, "Protocol artifact path escaped the repository root.");
+	// `lstatSync` does not follow the link, so a symlink already fails `isFile()` and
+	// the check needs no second operand. An earlier `|| stat.isSymbolicLink()` here
+	// could never evaluate true, which made the test named for it exercise the
+	// not-a-regular-file branch instead.
 	const stat = existsSync(target) ? lstatSync(target) : null;
-	if (!stat?.isFile() || stat.isSymbolicLink())
-		throw new ProtocolVendorPinError(code, `${relativePath} must be a regular non-symlink file.`);
+	if (!stat?.isFile()) throw new ProtocolVendorPinError(code, `${relativePath} must be a regular non-symlink file.`);
 	return target;
 }
 
-function isNonEmptyString(value: unknown): value is string {
-	return typeof value === "string" && value.trim().length > 0;
+// Every sibling that reads this field requires semver. Accepting any non-empty
+// string here let `version: "../../x"` build a filename that the containment check
+// then refused as a path escape — fail-closed, but reported under
+// `vendored_artifact_missing` with an escape message, which sends the reader looking
+// for the wrong defect.
+function isSemanticVersion(value: unknown): value is string {
+	return typeof value === "string" && /^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$/u.test(value);
 }
 
-function isProtocolVendorPinStatus(value: unknown): value is ProtocolVendorPinStatus {
-	return typeof value === "string" && STATUSES.has(value as ProtocolVendorPinStatus);
-}
-
-function isProtocolVendorPinSource(value: unknown): value is ProtocolVendorPinSource {
-	return (
-		isObjectRecord(value) &&
-		value.repository === SOURCE_REPOSITORY &&
-		value.package_path === VENDORED_PATH &&
-		isGitObject(value.commit) &&
-		isGitObject(value.tree)
-	);
-}
-
-function isProtocolVendorPinShipped(value: unknown): value is ProtocolVendorPinShipped {
-	return (
-		isObjectRecord(value) &&
-		value.lock_file === LOCK_FILE &&
-		isProtocolVendorPinStatus(value.status) &&
-		isGitObject(value.gateway_commit) &&
-		isGitObject(value.protocol_tree)
-	);
+function isSha256(value: unknown): value is string {
+	return typeof value === "string" && SHA256_PATTERN.test(value);
 }
 
 if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
-	// `--development` is the escape hatch the owner decision asks for, and it is
-	// deliberately not the default: a bare run is the ship gate. It reports the
-	// same pin without the shippability assertion, and says in its own output
-	// that it proves nothing about a release or an installed worker, so the
-	// answer cannot be pasted somewhere as evidence that it is not.
+	// `--development` is accepted and deliberately does nothing different. It stays
+	// so the documented command and the operator habit keep working, and so the
+	// output SAYS why there is no longer a weaker mode to fall back to.
 	const development = process.argv.slice(2).includes("--development");
 	try {
-		const result = development ? validateProtocolVendorPin() : assertShippableProtocolVendorPin();
+		const result = assertShippableProtocolVendorPin();
 		console.log(
 			JSON.stringify(
 				development
 					? {
 							...result,
-							proof_level: "development_only",
+							proof_level: "same_as_release",
 							non_claims: [
 								...result.non_claims,
-								"This is development-only protocol proof. It is not release proof, not installed-worker proof, and must not be used by a release, acceptance, or announcement path.",
+								"`--development` no longer selects a weaker check. The vendored artifact is the shipped artifact, so there is no proof/ship divergence for a development mode to tolerate.",
 							],
 						}
 					: result,

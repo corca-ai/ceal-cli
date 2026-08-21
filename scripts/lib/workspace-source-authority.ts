@@ -1,7 +1,11 @@
 import { existsSync } from "node:fs";
 import path from "node:path";
 
-export const WORKSPACE_PACKAGE_DIRECTORIES = Object.freeze(["ceal-protocol", "ceal-client", "ceal-worker-cli"]);
+// Only the packages this repository AUTHORS. `ceal-protocol` left this list when
+// it stopped being a workspace: it arrives as a signed tarball under `vendor/`, so
+// there is no editable source tree for a source-authority resolver to prefer, and
+// naming one here would send the loader looking for a directory that must not exist.
+export const WORKSPACE_PACKAGE_DIRECTORIES = Object.freeze(["ceal-client", "ceal-worker-cli"]);
 
 type WorkspaceSourceAuthorityOptions = {
 	repoRoot: string;

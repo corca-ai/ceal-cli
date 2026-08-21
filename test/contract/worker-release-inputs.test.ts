@@ -80,7 +80,7 @@ function resolveContractInputs(options: ContractInputOptions) {
 // vendored copy's version rather than a literal: hard-coding one makes every
 // future artifact consumption fail here for a reason that has nothing to do with
 // the code under test.
-const VENDORED_PROTOCOL_VERSION = JSON.parse(readFileSync(path.join(ROOT, "packages/ceal-protocol/package.json"), "utf8")).version;
+const VENDORED_PROTOCOL_VERSION = JSON.parse(readFileSync(path.join(ROOT, "gateway-protocol-handoff-lock.json"), "utf8")).protocol.version;
 test("signed Protocol source acquisition writes nothing before exact commit and tree verification", (context: TestContext) => {
 	const scratch = scratchDir(context, "ceal-signed-protocol-source-mutation-");
 	const outputDirectory = path.join(scratch, "published", "ceal-protocol");
@@ -271,9 +271,12 @@ test("worker release inventory rejects stale sidecars, an unbound control confor
 test("the release chokepoint reaches the protocol pin guard before it reads any argument", async (context: TestContext) => {
 	const scratch = realpathSync(mkdtempSync(path.join(tmpdir(), "ceal-pin-chokepoint-")));
 	context.after(() => rmSync(scratch, { recursive: true, force: true }));
-	for (const file of ["worker-release-inputs.json", "gateway-protocol-handoff-lock.json", "protocol-vendor-pin.json", "install-ceal.sh"]) {
+	for (const file of ["worker-release-inputs.json", "gateway-protocol-handoff-lock.json", "install-ceal.sh"]) {
 		cpSync(path.join(ROOT, file), path.join(scratch, file));
 	}
+	// The vendored archive is deliberately NOT staged. That is what makes this
+	// scratch tree unshippable, and an unshippable Protocol is what the guard has to
+	// refuse before any argument is read.
 	for (const owned of ["packages/ceal-client", "packages/ceal-worker-cli", "skills/ceal-guide"]) {
 		mkdirSync(path.join(scratch, owned), { recursive: true });
 	}
@@ -306,14 +309,16 @@ test("the release chokepoint reaches the protocol pin guard before it reads any 
 		"protocol_tarball",
 		"the chokepoint read its arguments before asserting protocol shippability; the pin guard call is gone or moved",
 	);
-	// The scratch tree is not a git checkout, so the guard cannot establish the
-	// vendored identity — which is a guard verdict, and the point. The divergence
-	// verdicts themselves belong to protocol-vendor-pin.test.ts; this asserts only
-	// that a release path cannot get past the guard without one.
-	assert.match(
-		code,
-		/^(?:git_identity_failed|proof_shipment_protocol_divergence|invalid_protocol_vendor_pin|shipped_lock_mismatch|stale_divergence_record)$/u,
-	);
+	// The scratch tree carries the lock but not the archive it binds, so the guard
+	// cannot establish the vendored identity — which is a guard verdict, and the
+	// point. The artifact verdicts themselves belong to protocol-vendor-pin.test.ts;
+	// this asserts only that a release path cannot get past the guard without one.
+	// The retired codes this used to admit (git_identity_failed,
+	// proof_shipment_protocol_divergence, invalid_protocol_vendor_pin,
+	// shipped_lock_mismatch, stale_divergence_record) had preconditions that no longer
+	// exist. What a scratch tree can still produce is a missing or wrong archive, or a
+	// lock that cannot be read.
+	assert.match(code, /^(?:vendored_artifact_missing|vendored_artifact_mismatch|invalid_gateway_handoff_lock)$/u);
 	// Re-raised as this module's error type, so a caller catching
 	// WorkerReleaseInputError sees the refusal instead of an escaping exception.
 	assert.throws(() => resolveWorkerReleaseDevelopmentInputs({ repoRoot: scratch, ...absent }), WorkerReleaseInputError);

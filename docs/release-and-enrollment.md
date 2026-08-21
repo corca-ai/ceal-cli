@@ -45,12 +45,14 @@ absolute archive path and the mechanically derived candidate lock as JSON.
 Use that archive for the input slice and apply that lock value exactly; a local
 Gateway checkout is not a substitute.
 
-With that candidate verified, update
-`gateway-protocol-handoff-lock.json`, `protocol-vendor-pin.json`, the frozen
-`packages/ceal-protocol` tree, the private control-session contract, generated
-source, and workflow handoff literals together. The vendor-pin check reads the
-committed frozen tree by design, so run it after committing that coherent slice;
-never weaken it to accept a transient worktree copy.
+With that candidate verified, update `gateway-protocol-handoff-lock.json`, the
+archive under `vendor/ceal-protocol/`, the two package manifests that name it as
+a `file:` dependency, the `package-lock.json` entries carrying that file's
+`integrity`, the private control-session contract, generated source, and workflow
+handoff literals together. There is no vendored
+tree to re-sync and no pin file to restamp: `npm run lint:protocol-artifact`
+hashes the archive against the lock, so the slice is coherent exactly when those
+two agree.
 
 Then bump the three manifests — `package.json`, `packages/ceal-client`, and
 `packages/ceal-worker-cli` including its exact `@corca-ai/ceal` pin — and

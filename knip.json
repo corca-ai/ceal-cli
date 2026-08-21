@@ -15,7 +15,6 @@
 		}
 	},
 	"tags": ["-testOnly"],
-	"ignoreWorkspaces": ["packages/ceal-protocol"],
 	"ignoreDependencies": [
 		"@secretlint/secretlint-rule-aws",
 		"@secretlint/secretlint-rule-openai",

@@ -8,7 +8,6 @@ import { fileURLToPath, pathToFileURL } from "node:url";
 const DEFAULT_REPO_ROOT = resolvePath(dirname(fileURLToPath(import.meta.url)), "..");
 const REPO_ROOT = resolvePath(process.env.CEAL_SOURCE_TEST_REPO_ROOT ?? DEFAULT_REPO_ROOT);
 const PACKAGES = new Map([
-	["@corca-ai/ceal-protocol", "ceal-protocol"],
 	["@corca-ai/ceal", "ceal-client"],
 	["@corca-ai/ceal-worker-cli", "ceal-worker-cli"],
 ]);

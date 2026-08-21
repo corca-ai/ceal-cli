@@ -21,8 +21,10 @@ history or full rationale.
   signed package under `vendor/ceal-cli/`; there is no source mirror to sync.
 - Private sibling `corca-ai/ceal` owns `cealctl`, `cealctl-guide`, and canonical
   Protocol/conformance source. Read it there; do not re-vendor deleted surfaces.
-- `packages/ceal-protocol` is frozen. Consume a Gateway-issued artifact and
-  re-pin it in one commit; never originate an edit there.
+- The Protocol arrives as the signed archive under `vendor/ceal-protocol/` that
+  `gateway-protocol-handoff-lock.json` binds, consumed as a `file:` dependency.
+  There is no editable copy to originate an edit in; acquire a successor with
+  `npm run bootstrap:gateway-handoff -- --tag <tag>` and re-lock it in one commit.
 
 ## Gates
 
@@ -41,8 +43,8 @@ history or full rationale.
   `eslint.config.ts`. It replaces `biome check .`, whose three jobs it keeps:
   eslint core dropped formatting in v8.53, so @stylistic carries formatting and
   simple-import-sort carries import order. That file transcribes the deleted
-  `biome.json` and reasons each deliberate deviation and the frozen-Protocol
-  exclusion in place; read it and [docs/gates.md](docs/gates.md) before changing them.
+  `biome.json` and reasons each deliberate deviation in place; read it and
+  [docs/gates.md](docs/gates.md) before changing them.
 - `check.yml` runs the full gate only for paths its `scope` job classifies as
   code. Other workflows are tag-only release lanes. `main` is deliberately
   unprotected; do not change that tradeoff. A pusher owns reading
@@ -51,12 +53,13 @@ history or full rationale.
   `npm run hooks:check`. Pre-commit runs the cheap
   lint/type tier and no test or build; pre-push runs the iteration gate, or the
   full gate for a tag. Bypass visibly with `--no-verify`, never by editing a hook.
-- `protocol-vendor-pin.json` binds the frozen copy. Proof/shipment divergence is
-  fatal and blocks release, packing, and acceptance even when declared in the
-  Protocol quarantine record; a declaration quarantines, never clears. `npm run check:unit`
-  remains the development iteration gate by using converged contract fixtures;
-  `npm run check:protocol-dev` is the narrower Protocol/client proof. Neither is
-  release proof, and the full gate and every ship-facing command remain blocked.
+- `npm run lint:protocol-artifact` hashes the vendored Protocol archive against
+  `gateway-protocol-handoff-lock.json`, and runs inside both gates and the
+  pre-push hook. Proof/shipment divergence no longer has a constructor: the
+  archive this repository tests against is the archive a release ships, so there
+  is nothing left to declare or quarantine. `npm run check:protocol-dev` is still
+  the narrower Protocol/client path, but its `--development` flag selects no
+  weaker check. Neither is release or installed-worker proof.
 - `test:unit` is coverage over owned client/worker source with `all: true` and
   fail-closed floors. Raise floors after measured improvement; never lower one
   to clear a gate. `npm run coverage:scripts` is the Linux-measured third target

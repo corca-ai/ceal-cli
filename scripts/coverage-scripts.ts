@@ -36,6 +36,22 @@ import path from "node:path";
 import process from "node:process";
 import { fileURLToPath } from "node:url";
 
+// MEASURED 2026-08-21, and left red on purpose rather than quietly adjusted.
+//
+// The `functions` floor in `.c8rc.scripts.json` is 91 and this tree reports 90.24.
+// It was 90.16 at `f5c351f`, before the Protocol tarball cutover, measured in a
+// clean worktree — so the floor was ALREADY unmet and the cutover raised it rather
+// than broke it. Whoever changes this number should know that.
+//
+// Nobody noticed because nothing on a feature branch runs it: `check:unit` is what
+// `.githooks/pre-push` invokes for a non-tag push and it does not include
+// `coverage:scripts`, and `check.yml` only fires on `main` and on pull requests. So
+// the floor is exercised by a PR, a tag, or a maintainer typing `npm run check` —
+// and a long-lived branch can drift under it for as long as it likes.
+//
+// Not adjusted here. Lowering a floor to match the tree is the move this repository
+// exists to refuse, and raising coverage to meet it is real work with an owner. The
+// gap is 0.76 points of FUNCTION coverage; the other three floors pass with room.
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const CONFIG = ".c8rc.scripts.json";
 const TIERS = "test:tiers";

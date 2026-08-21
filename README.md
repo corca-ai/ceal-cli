@@ -22,51 +22,63 @@ SDK and the agent-facing `ceal` worker.
   `.github/workflows/cealctl-release.yml`, and the `test:legacy-compatibility`
   suite that existed to audit them. Do not re-vendor any of it; read
   `corca-ai/ceal`.
-- `packages/ceal-protocol` is the one frozen input left. Do not add a
-  Gateway/operator feature, release surface, guide, or command to it; consume the
-  Gateway-issued artifact and re-pin.
+- The Gateway Protocol is the one vendored input left, and it is an archive
+  rather than a tree: `vendor/ceal-protocol/corca-ai-ceal-protocol-<version>.tgz`,
+  acquired and signature-verified by
+  `npm run bootstrap:gateway-handoff -- --tag <tag>`. Do not unpack it into a
+  workspace to add a Gateway/operator feature, release surface, guide, or
+  command; ask its owner for a successor handoff.
 
-`protocol-vendor-pin.json` records the Gateway commit and `packages/ceal-protocol`
-subtree the frozen protocol copy was taken from, alongside the protocol subtree
-inside the locked handoff archive a release consumes. `node
-scripts/verify-protocol-vendor-pin.ts` binds the three offline, and both
-failures are fatal: the copy drifting from its recorded source, and a divergence
-between the copy and the shipped archive. The second fails
-`proof_shipment_protocol_divergence`, because it means what this repository tests
-is not what a release would ship. A divergence may still be declared — naming a
-disposition owner and the tracked `docs/protocol-quarantine.md` record — but a
-declaration is a quarantine, not a clearance, and re-syncing the copy or bumping
-`gateway-protocol-handoff-lock.json` expires it. `npm run check:unit` remains the
-aggregate development iteration gate through converged fixtures, while `npm run
-check:protocol-dev` is the narrower Protocol/client path. Neither proves a release
-or an installed worker; the full and ship-facing paths remain refused.
+`gateway-protocol-handoff-lock.json` records that archive's identity — the
+producing Gateway commit and protocol subtree, the package name and version, the
+filename, and the SHA-256 — and both `packages/ceal-client` and
+`packages/ceal-worker-cli` depend on the file by path, so npm binds its exact
+bytes through the lockfile's `integrity` field. `npm run lint:protocol-artifact`
+(`node scripts/verify-protocol-vendor-pin.ts`) hashes the file in `vendor/` and
+fails unless it equals what the lock binds; it runs inside `npm run check` and
+`npm run check:unit`, so CI and the pre-push hook both enforce it, and
+`vendored_artifact_missing`, `vendored_artifact_mismatch`, and
+`invalid_gateway_handoff_lock` are its whole failure vocabulary.
 
-The check reaches no remote, so it cannot see the copy falling behind its owner,
-and `source.commit` is a recorded observation rather than a locally verified one
-— confirming it needs the owner checkout. `shipped.protocol_tree` is no longer in
-that category: the signed protocol handoff declares the producer's protocol
-subtree and the lock records it. The
-divergence verdict compares `source.commit` against the lock's `gateway.commit`
-rather than the pin's two tree fields, so it is not computed entirely from
-author-written values — but `source.commit` is still self-recorded, which makes a
-divergence detectable without making convergence observable.
+That apparatus used to be much larger, and the shrink is the evidence rather than
+a loss of coverage. The Protocol arrived here as an editable copy under
+`packages/ceal-protocol`, a separate `protocol-vendor-pin.json` bound three
+identities, and the verifier policed the copy against its own record and against
+the archive a release would consume. Policing did not hold: enabling
+`noUncheckedIndexedAccess` swept the frozen copy in as authored source, the
+resulting errors were fixed inside it, and one of those fixes forked
+`compareProtocolVersions` so that ragged version arrays compared equal here and
+by `?? 0` upstream — two protocol negotiators under one package name. Consuming
+the signed archive directly makes proof/ship divergence structurally impossible
+rather than merely detected: what this repository tests IS the archive a release
+ships, not a local recompilation of a tree that was once equal to it. The pin
+file is gone with it, because every identity it restated already came out of the
+signed archive, and a second file restating them could only agree or lie.
 
-The worker workspace contains exactly the three packages that the worker
+What the check still does not do is reach a remote. It proves the bytes in
+`vendor/` are the ones the lock names; it does not re-run the Sigstore
+verification the bootstrap performed, and it cannot tell you the lock still
+matches a live `corca-ai/ceal`.
+
+The worker workspace contains exactly the two packages that the worker
 release builds. The frozen operator directory used to sit beside them, outside
 dependency installation and worker CI so that a worker protocol update could
 never make `npm ci` resolve the old operator's independently frozen protocol
-pin. It is deleted now, and `repo-gates.test.mjs` asserts its absence rather
-than its exclusion.
+pin. It is deleted now, and `test/contract/repo-gates.test.ts` asserts its absence
+rather than its exclusion.
 
-- `@corca-ai/ceal-protocol`: frozen Gateway compatibility input;
 - `@corca-ai/ceal`: the public client SDK and Gateway-neutral request transport;
 - `@corca-ai/ceal-worker-cli`: the private build workspace for the agent-facing
   `ceal` binary.
 
+Both depend on `@corca-ai/ceal-protocol`, which is not a workspace: it resolves
+to the vendored archive above.
+
 The release packed-consumer build consumes a supplied packed Gateway Protocol
-artifact rather than the workspace copy. Run `npm run verify:protocol-consumer
--- --help` to discover the verifier's required inputs; an actual invocation
-with those inputs performs the local, no-network consumer proof.
+artifact, and there is no longer a workspace copy it could prefer instead. Run
+`npm run verify:protocol-consumer -- --help` to discover the verifier's required
+inputs; an actual invocation with those inputs performs the local, no-network
+consumer proof.
 
 `@corca-ai/ceal` names only the client SDK. It does not contain the CLI, Agent
 runner, Gateway server, or an umbrella SDK.
@@ -239,10 +251,12 @@ marker and without it the rule reports 15 sites that are all convention. The
 `WritableStream`, and `TransformStream` survives as core `no-restricted-globals`:
 this tree spells web globals through `globalThis`.
 
-`packages/ceal-protocol` and the generated worker sources are excluded on purpose,
-for the same reason `biome.json` excluded them: a lint finding in a frozen copy is
-one this lane may not act on, and "just fix the lint error" is how a frozen copy
-drifts. Formatting-only commits are listed in
+The generated worker sources are excluded on purpose, for the same reason
+`biome.json` excluded them: a lint finding in output nobody edits is one this
+lane may not act on. `packages/ceal-protocol` used to sit on that list for the
+stronger version of the same reason — "just fix the lint error" is how a frozen
+copy drifts, and it did — but there is no copy to exclude now, and a tarball in
+`vendor/` is not a lint target. Formatting-only commits are listed in
 `.git-blame-ignore-revs` so `git blame` skips them, which `npm run hooks:install`
 configures for the clone.
 

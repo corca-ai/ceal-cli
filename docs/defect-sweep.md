@@ -152,8 +152,10 @@ had already been handed the evidence.
 
 **The structural survivor was the safe-ref grammar with no home**, spelled as its
 own literal at six sites across the two owned packages, with three more
-prefixed budgets nobody had noticed. `packages/ceal-protocol` declares the
-grammar and does not re-export it, so no site could have imported it.
+prefixed budgets nobody had noticed. `@corca-ai/ceal-protocol` declares the
+grammar and does not re-export it, so no site could have imported it — and it is
+a signed archive this repository consumes rather than a tree it could edit, so
+the single home stays out of reach.
 
 **Neither count licenses "converging", and the reason is the same as before:
 depth.** Both passes were run by different agents against denominators that are

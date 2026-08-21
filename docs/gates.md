@@ -88,17 +88,20 @@ index projection, so staged additions and deletions cannot be hidden by the
 working tree. Plain `npm run lint:import-hard-failures` is the retained-input
 mutation proof command.
 
-`eslint.config.ts` ignores the frozen `packages/ceal-protocol` deliberately, for
-the same reason `biome.json` excluded it: a lint finding there is one this lane
-may not act on, and "just fix the lint error" is how a frozen copy drifts. Do not
-narrow its `ignores` to lint code this lane may not edit.
-`packages/ceal-worker-cli/src/generated` stays ignored on the same list.
+`eslint.config.ts` used to ignore `packages/ceal-protocol` for the same reason
+`biome.json` excluded it: a lint finding in a frozen copy is one this lane may
+not act on, and "just fix the lint error" is how a frozen copy drifts. That entry
+is gone because the copy is — the Protocol is a signed archive under `vendor/`
+now, not a lintable tree. Keep the principle when adding an exclusion:
+`packages/ceal-worker-cli/src/generated` is still ignored because it is build
+output, and `ignores` should not be narrowed to lint code this lane may not edit.
 
 The `check:unit` and `check` gates run only client/worker package tests and the
 explicit worker contract/release lists. The root npm workspace names exactly the
-protocol, client, and worker packages. The frozen protocol is built only as the
-exact local input needed to type-check the client; its unit suite remains
-Gateway-owned.
+client and worker packages. Both depend on `@corca-ai/ceal-protocol` as a `file:`
+dependency resolved from the vendored archive, so nothing here builds or tests
+the Protocol: its suite stays with its owner, and the published tarball carries
+`dist` and `conformance` without a `src` or `test` directory at all.
 
 There is no third suite any more. `test:legacy-compatibility` audited the frozen
 `cealctl` and dual-release material, and that material was deleted once
@@ -115,23 +118,29 @@ Three directories, three globs, and placing a file is the entire declaration:
 - `test/source/` → the contract tier's source-authoritative lane, which runs
   through `test/run-source-tests.ts`
 
-Plus `packages/ceal-protocol/test/*.test.ts`, which the source lane globs because
-that workspace is the one with no root-reached suite of its own — `coverage`
-reaches `ceal-client` and `ceal-worker-cli` and stops there. One explicit entry
-survives: `ceal-worker-cli`'s attachment-stream carrier, one file among ~28 in a
-directory the contract tier does not otherwise own.
+One explicit entry survives beside those three: `ceal-worker-cli`'s
+attachment-stream carrier, one file among ~28 in a directory the contract tier
+does not otherwise own. The source lane used to glob
+`packages/ceal-protocol/test/*.test.ts` as well, because that workspace was the
+one with no root-reached suite of its own — `coverage` reaches `ceal-client` and
+`ceal-worker-cli` and stops there. That glob is gone with the workspace, and it
+could not survive the move regardless: the vendored tarball ships `dist` and
+`conformance` and no suite to run.
 
 The lanes used to be two hand-written path lists — one in `package.json` and a
 second copy in `repo-gates.test.ts` — with a gate that asserted only that the
-copies agreed. That proved nothing about the tree, and it hid a real defect:
-`packages/ceal-protocol/test/leased-consumer-source-import.test.ts` was in
-neither list and no root gate ran it. What the gate checks now is the tree:
-every globbed token matches at least one file, every explicitly named path
+copies agreed. That proved nothing about the tree, and it hid a real defect: the
+then-vendored `packages/ceal-protocol/test/leased-consumer-source-import.test.ts`
+was in neither list and no root gate ran it. What the gate checks now is the
+tree: every globbed token matches at least one file, every explicitly named path
 exists, no file is claimed by two tiers, `test/` holds exactly those three
 directories, and every suite file in the worktree has exactly one owner — either
-a glob suite the root chain provably reaches (BOTH halves read: the root call
-AND the package script, which is what tells `ceal-protocol` apart from
-`ceal-client`) or an explicit tier entry.
+a glob suite the root chain provably reaches or an explicit tier entry.
+
+Ownership reads BOTH halves — the root call AND the package script — and the
+deleted Protocol workspace is exactly why: it had a `test` script, that script
+did glob, and nothing in the root chain called it, so reading either half alone
+would have called it owned. Keep both reads when a third workspace appears.
 
 "Every suite file in the worktree" is `git ls-files`, not a walk of the
 directories somebody remembered. That distinction is the whole check: a walk
@@ -248,8 +257,10 @@ Formatting-only commits belong in `.git-blame-ignore-revs`, which
 
 ### Source-authoritative behavior and isolated package artifacts
 
-Protocol, client, and Worker behavior tests execute `src/**/*.ts` through
-`test/source-loader.ts`.
+Client and Worker behavior tests execute `src/**/*.ts` through
+`test/source-loader.ts`. The Protocol is not in that map any more: it has no
+source in this checkout, so it resolves through `node_modules` to the vendored
+archive's `dist` like any other dependency.
 The loader owns both direct workspace paths and bare workspace package names;
 it redirects either form to the editable TypeScript source and refuses a
 workspace `dist` resolution that has no source authority. `test/run-source-tests.ts`
@@ -270,9 +281,9 @@ it is not installed-worker, release, or live-serving proof.
 Emitted declarations, package exports, and executable JavaScript are a
 different proof purpose. `test/client-artifact.test.ts` asks
 `test/artifact-workspace.ts` to copy only source/config/manifest inputs into a
-fresh temporary workspace, emit Protocol, client, and Worker packages there,
-and load their exact public exports and Worker executable against those
-temporary dependencies. The proof binds source and artifact digests and
+fresh temporary workspace, emit the client and Worker packages there against the
+vendored Protocol archive, and load their exact public exports and Worker
+executable against those temporary dependencies. The proof binds source and artifact digests and
 fingerprints checkout `dist` across the build; the artifact build neither
 consumes nor changes checkout `dist`.
 
@@ -312,7 +323,7 @@ race that loses is silent:
   `npm run build` itself, because a new one that did would reintroduce exactly
   this race and pass its own tests.
 - `repo-gates.test.ts` binds the root build and coverage routes, while
-  `repo-build.test.mjs` proves standalone package behavior tests have no
+  `repo-build.test.ts` proves standalone package behavior tests have no
   checkout-dist hooks. Keeping those assertions at both consumer boundaries
   prevents a behavior lane from silently reacquiring artifact authority.
 - The stale-lock break exists so a process killed while holding the lock costs
@@ -332,77 +343,92 @@ through their isolated build and artifact checks. On Darwin, platform-gated
 Linux-only checks report their unproved Linux scope; a green Darwin release run
 does not claim that the Linux executable lane was exercised.
 
-## The Vendored Protocol Copy Has A Recorded Source
+## The Vendored Protocol Is An Archive, Not A Copy
 
-`packages/ceal-protocol` is a frozen copy of a tree `corca-ai/ceal` owns. Its
-only correctness claim is "identical to somewhere else", and for most of this
-repository's life nothing recorded where that somewhere else was. A green gate
-therefore said nothing about it, and in one day the copy cost three separate
-sessions: it blocked the announcement-policy renderer, it split what the gate
-tests from what a release ships, and a re-pull hours after a sync found it stale
-again over a single sentence this client would print verbatim.
+`npm run lint:protocol-artifact` hashes
+`vendor/ceal-protocol/<lock.protocol.filename>` and fails unless it equals
+`gateway-protocol-handoff-lock.json`'s `protocol.sha256`. It also requires that
+lock to carry the producing `gateway.commit` and `gateway.protocol_tree`, because
+those are the identities a release quotes and an unsourced quote is worse than no
+quote. That is the entire check. It runs in `npm run check` and
+`npm run check:unit`, so `check.yml` and `.githooks/pre-push` both enforce it on
+every branch.
 
-One of those three is what this gate addresses, and it is worth being exact
-about which: the copy drifting from *its own record*. The copy falling behind the
-*owner* is a different failure, and nothing here can see it — that needs the
-remote, and this check never reaches one.
+It is small because what it guards got smaller, and that is the substance of this
+section rather than a footnote to it. The Protocol used to arrive here as an
+EDITABLE SOURCE TREE under `packages/ceal-protocol`, registered as an npm
+workspace. A directory whose only correctness claim is "identical to somewhere
+else" needs constant policing, so `protocol-vendor-pin.json` bound three
+identities and `scripts/verify-protocol-vendor-pin.ts` compared them:
 
-`protocol-vendor-pin.json` names three identities and
-`scripts/verify-protocol-vendor-pin.ts` binds them offline, reading local files,
-the Git index, and the working tree:
+- **source** — the Gateway commit and protocol subtree the copy was taken from;
+- **vendored** — what `packages/ceal-protocol` hashed to right now;
+- **shipped** — the protocol subtree inside the locked handoff archive.
 
-- **source** — the Gateway commit and `packages/ceal-protocol` subtree this copy
-  was taken from;
-- **vendored** — what `packages/ceal-protocol` hashes to right now;
-- **shipped** — the protocol subtree inside the locked handoff archive that
-  `gateway-protocol-handoff-lock.json` binds a release to consume.
+Policing it did not work, and how it failed is the argument against trying again.
+Commit `a8b3b96` turned on `noUncheckedIndexedAccess` in
+`tsconfig.typecheck.json` and `tsconfig.tools.json`, which swept the frozen copy
+in as authored source, and then fixed the resulting errors INSIDE the frozen
+copy. One of those fixes forked wire semantics: the vendored
+`compareProtocolVersions` returned `0` when either side's index was `undefined`,
+so ragged version arrays compared EQUAL here, while canonical reads
+`left[index] ?? 0` and `right[index] ?? 0` and treats a missing part as zero. Two
+protocol negotiators under one package name, produced by a repo-local ratchet
+doing exactly what it had been asked to do. The gate that would have refused it
+ran three tiers later, and afterwards the pin sat red in both modes —
+`node scripts/verify-protocol-vendor-pin.ts` and the same command with
+`--development` each exited 2 with `vendored_tree_mismatch`.
 
-The frozen package suite is part of `test:contract`. Its shared test support,
-including the non-canonical base64url fixture helper, lives inside the pinned
-`packages/ceal-protocol/test/protocol-test-support.ts` tree. There is no
-out-of-subtree compatibility helper or second blob identity for the release
-pin to carry.
+So the copy is gone and the archive is the input. `packages/ceal-client` and
+`packages/ceal-worker-cli` name the tarball as a `file:` dependency, npm binds
+its exact bytes through the lockfile's `integrity` field, and
+`npm run bootstrap:gateway-handoff -- --tag <tag>` is how it arrives — the same
+command that verifies the Sigstore signature before anything is written. What
+collapses is the point:
 
-The contract-tier `test/contract/protocol-vendor-pin.test.ts` uses synthetic
-lock and quarantine inputs for validator/error-branch coverage. The release-tier
-`test/protocol-vendor-pin.test.ts` owns the four assertions that read the real
-checkout, Git tree/index, pin, or lock. That placement keeps live
-repository binding out of `check:unit` while retaining it in `test:release` and
-the full `test:tiers` path.
+- There is no *source* against *vendored* drift, because there is no second copy
+  to drift. The bytes on disk are the published bytes or the digest disagrees.
+- There is no *vendored* against *shipped* divergence, because what this
+  repository tests IS what a release ships: the same archive, not a local
+  recompilation of a tree that was once equal to it. Proof/ship divergence is
+  structurally impossible now rather than merely detected.
+- The `assume-unchanged`, `skip-worktree`, and uncommitted-edit checks are gone.
+  A content digest answers what all three approximated, and answers it about the
+  bytes rather than about what Git was told to believe.
 
-*source* against *vendored* is the drift check, and it fails on a committed edit
-(the recorded tree stops matching `HEAD:packages/ceal-protocol`) and on an
-uncommitted one (a committed tree hash cannot see a mid-sync working tree). Both
-are real failures, not shape checks: re-sync the copy and update the pin in the
-same commit, or the gate is correct to be red.
+`vendored_tree_mismatch`, `vendored_worktree_dirty`, `vendored_change_hidden`,
+`undeclared_divergence`, `stale_divergence_record`, and
+`proof_shipment_protocol_divergence` are therefore gone as error codes, and the
+quarantine record a declared divergence had to name is discharged and deleted.
+What is left is `vendored_artifact_missing`, `vendored_artifact_mismatch`, and
+`invalid_gateway_handoff_lock`. The pin FILE is gone too: every identity it
+recorded is in the handoff lock, which came from the signed archive rather than
+from an author, and a second file restating them could only ever agree or lie.
 
-*source* against *shipped* is the proof/ship divergence, and it is **fatal**. The
-Gateway owner ruled it ship-blocking for every worker release, installed-acceptance
-packet, and claim that a green protocol test proves shipped worker behavior, so
-`assertShippableProtocolVendorPin` fails `proof_shipment_protocol_divergence` and
-names both immutable identities. The verdict compares `source.commit` against the
-lock's `gateway.commit` — deliberately not the pin's two tree fields, which are
-both author-written and would make the verdict a statement about the pin rather
-than a check of anything. The residual limit is worth stating plainly:
-`source.commit` is itself self-recorded, so this makes divergence *detectable*
-without making convergence *observable*.
+`tsconfig.typecheck.json` and `tsconfig.tools.json` no longer map
+`@corca-ai/ceal-protocol` in `paths`. It resolves through `node_modules` to the
+tarball's `dist/*.d.ts`, which `skipLibCheck` skips — and that is precisely what
+lets `noUncheckedIndexedAccess` stay enforced on authored source without ever
+reaching a package this repository does not own. Preventing that exact recurrence
+is the reason, not tidiness. `knip.json` no longer needs an `ignoreWorkspaces`
+entry and `eslint.config.ts` no longer needs a `packages/ceal-protocol/**`
+ignore, for the same reason: a lint or unused-export finding needs a file this
+lane could act on.
 
-A divergence is still declarable, and the declaration still has to name its
-reason, its disposition owner, and the tracked `docs/protocol-quarantine.md`
-record — but
-a declaration is now a **quarantine, not a clearance**. It records why the state
-exists; it does not let anything ship. Plain existence was too weak a check for
-the request: every path in the tree satisfied it, so a one-character edit could
-keep a dead declaration alive by aiming it at `README.md`.
+The contract-tier `test/contract/protocol-vendor-pin.test.ts` uses injected lock
+and digest fixtures for validator and error-branch coverage. The release-tier
+`test/protocol-vendor-pin.test.ts` binds the real checkout, and one of its
+assertions re-derives the archive digest itself rather than re-reading the
+validator's answer — without that, a validator that returned the lock's value
+verbatim would pass. That placement keeps live repository binding out of
+`check:unit` while retaining it in `test:release` and the full `test:tiers` path.
 
-Development motion survives in two scopes. `npm run check:unit` remains the
-ordinary iteration gate: contract behavior that must reach past the ship guard
-uses synthetic/injected inputs, while the live checkout binding stays in the
-release tier. Separate guard-reachability tests prove the release-input
-chokepoint fails on a pin error before inspecting arguments and acceptance fails
-on an exact divergent fixture before resolving an installed binary. This keeps
-downstream contract branches observable without adding a production bypass or
-claiming that the live checkout is shippable.
+What this gate does not do is reach a remote, and that limit is narrower than it
+was without having disappeared. It proves the artifact in `vendor/` is the one
+the lock names. It does not re-run the signature verification the bootstrap
+performed, and it cannot tell you the lock still matches a live `corca-ai/ceal` —
+confirming that needs the owner's checkout, which is a separate act from running
+the gate.
 
 Feedback timing used to be asymmetric: there was no `.githooks/pre-commit`, so a
 TypeScript error first appeared at pre-push, after the commit that carried it had
@@ -436,21 +462,32 @@ Verify a clone actually runs these with `npm run hooks:check`, which refuses
 both an unset `core.hooksPath` and a hook whose executable bit is missing — git
 skips a hook it cannot execute and announces it only under `advice.ignoredHook`.
 
-`npm run check:protocol-dev` is the narrower Protocol/client path. It runs the
-client suite plus `verify-protocol-vendor-pin.ts --development`, which reports
-the live pin without the shippability assertion and stamps its own output
-`proof_level: development_only` with the non-claim spelled out. Neither
-development command is release or installed-worker proof, and no release,
-acceptance, or announcement path calls the development verifier. The full gate
-still reaches the release tier, whose live-checkout positives remain red until
-the pin and shipment lock converge.
+`npm run check:protocol-dev` is the narrower Protocol/client path: the client
+suite plus `verify-protocol-vendor-pin.ts --development`. That flag is still
+accepted and deliberately does nothing different. It stays so the documented
+command and the operator habit keep working, and so the output SAYS why — it
+stamps `proof_level: same_as_release` and adds the non-claim that the vendored
+artifact is the shipped artifact, leaving no proof/ship divergence for a
+development mode to tolerate. Neither command is release or installed-worker
+proof.
 
-The refusal does not depend on which test command ran. `worker-release-inputs.mjs`
-asserts shippability inside `resolveWorkerReleaseDevelopmentInputs`, the single
-chokepoint every release, packing, and native-artifact path funnels through, and
-`worker-acceptance-packet.ts` asserts it before it resolves the installed binary
-— a packet describing a real install is the most convincing possible evidence for
-bytes the lock does not bind, so the refusal comes before anything is measured.
+The refusal does not depend on which test command ran.
+`scripts/worker-release-inputs.ts` asserts shippability inside
+`resolveWorkerReleaseDevelopmentInputs`, the single chokepoint every release,
+packing, and native-artifact path funnels through;
+`scripts/build-worker-release-assets.ts` asserts it directly in
+`mergeWorkerReleaseAssetSets`, and reaches it for a compose through the native
+builder rather than by its own call — the outcome is the same, the mechanism is
+not, and a reader who goes looking for the call inside `composeWorkerReleaseAssets`
+will not find one; and `scripts/worker-acceptance-packet.ts` asserts it before it resolves the
+installed binary — a packet describing a real install is the most convincing
+possible evidence for bytes the lock does not bind, so the refusal comes before
+anything is measured. `assertShippableProtocolVendorPin` keeps its own name and
+entry point for those callers even though it now asks exactly what
+`validateProtocolVendorPin` asks: a release must put the question itself rather
+than trust that some check ran, and removing it silently would let one caller
+start reading `undefined` as "fine". The `diverged` field survives in the result
+for the same reason, permanently `false` by construction.
 
 That chokepoint is one call, and for a while nothing could tell whether it was
 still there. This section used to say the call sites were pinned by source shape
@@ -462,65 +499,23 @@ own compose step — left every gate green, because the regex still matched the
 call inside `assertShippableProtocolVendorPinFor`, the error-translating wrapper
 that nothing then called. Reproduced on 2026-08-08.
 
-`worker-release-inputs.test.ts` now falsifies it behaviourally. A scratch
-`repoRoot` reaches the guard and fails for a pin reason; with the call removed the
-same input walks past it and fails on the next argument check instead. The
-acceptance suite has the sibling proof: its deliberately divergent scratch pin
-must fail before an absent binary is resolved. Two distinguishable outcomes are
-all a falsification needs. The injected divergence verdicts stay in
-`test/contract/protocol-vendor-pin.test.ts`, while the real checkout-binding
-positives live in `test/protocol-vendor-pin.test.ts` and remain release-owned.
+`test/contract/worker-release-inputs.test.ts` now falsifies it behaviourally. A
+scratch `repoRoot` reaches the guard and fails for an artifact reason; with the
+call removed the same input walks past it and fails on the next argument check
+instead. The acceptance suite has the sibling proof: its scratch checkout carries
+an archive whose bytes are not the signed ones, and `vendored_artifact_mismatch`
+must land before an absent binary is resolved. Two distinguishable outcomes are
+all a falsification needs.
+
+That acceptance fixture is itself a record of the change. It used to be a
+`diverged: true` pin, and a divergent state has no constructor any more, so the
+reachability proof is re-expressed against the failure that IS reachable — a
+mismatched archive. Prefer that translation to deleting a reachability proof:
+the guard still has to be reached, only the reason it refuses has changed.
 
 The source-shape gate in `repo-gates.test.ts` stays, because it still catches the
 easy case in `worker-acceptance-packet.ts`. Do not treat it as the guard's
 protection: it reads text, and text cannot tell a live call from a dead one.
-
-Two things then expire the declaration, and it is worth naming them exactly
-rather than saying "its own facts". **Re-sync the vendored copy** and the drift
-check fails until the pin moves with it. **Bump `gateway-protocol-handoff-lock.json`** and
-`shipped_lock_mismatch` fails, because the declaration was made about a shipped
-state that no longer exists. Deleting or untracking the request also fails it.
-That expiry is the point — a note in a document has no such property, and this is
-the third time a note failed to hold this line.
-
-What does *not* expire it: the archive's protocol bytes converging with the
-vendored copy produces no signal by itself. The gate still cannot notice a real
-divergence that nobody wrote down — `source.commit` is compared to the lock, but
-nothing confirms that `source.commit` is where the bytes actually came from.
-
-A `diverged` pin is not clearance to release, and since the guard became fatal it
-cannot be mistaken for one: it fails the gate rather than annotating it.
-
-Be precise about which of the three the gate can actually check. Only
-`source.tree` is verified locally, against `HEAD:packages/ceal-protocol`. The
-lock supplies `shipped.gateway_commit`, so that one is cross-checked.
-`shipped.protocol_tree` used to be unconfirmable here as well; it is not any
-more. The protocol-only handoff declares the producer's protocol subtree,
-`gateway-protocol-handoff-lock.json` records it, and the gate fails
-`shipped_lock_mismatch` when the pin names a different one. That closes the
-two-field forgery this document used to list as a known bypass: forging
-`source.tree` alone already failed against `HEAD:`, and forging
-`shipped.protocol_tree` to agree with it now contradicts the lock.
-
-Be exact about what that is. It is a comparison of two local files, one of which
-a maintainer wrote after verifying a signed archive. The gate still reaches no
-remote and still opens no tarball, so it cannot tell you the lock itself is
-honest — only that the pin does not disagree with it.
-
-`source.commit` remains a **recorded observation no local check can confirm** — a
-wrong value there passes the gate. Confirming it needs the owner checkout
-(`git rev-parse <commit>:packages/ceal-protocol`), which is a separate act from
-running the gate.
-
-The drift check reads the index flags as well as `git status`, and that is not
-belt-and-braces. `git update-index --assume-unchanged` (and `--skip-worktree`)
-tells Git to stop looking at a file: `git status` then calls an edited frozen
-copy clean while `HEAD:` still hashes to the pinned tree, so *both* other checks
-pass over a modified copy. `git ls-files -v` still reports the bit — a lowercase
-marker for assume-unchanged, `S` for skip-worktree — so the gate fails on the
-flag itself rather than on the edit it hides. Setting that bit is a deliberate
-act, but the gate has to describe the tree on disk, not the tree Git was told to
-pretend it sees.
 
 Nothing here consults the live `corca-ai/ceal` remote.
 
@@ -835,9 +830,11 @@ earns its place:
   OpenSSL reads the signed Actions run identity from its certificate. They are
   not package runtime dependencies, and the bootstrap fails closed when either
   executable is absent.
-- `ignoreWorkspaces` carries `packages/ceal-protocol` for the same reason
-  `eslint.config.ts` ignores it: it is a frozen vendored copy, and a finding
-  there is one no agent may act on.
+- `ignoreWorkspaces` used to carry `packages/ceal-protocol`, for the same reason
+  `eslint.config.ts` ignored it: it was a frozen vendored copy, and a finding
+  there was one no agent could act on. The entry is gone with the workspace. Do
+  not add it back for the vendored archive — a `.tgz` under `vendor/` is a
+  dependency, not a workspace `knip` would walk.
 
 The findings it started with were 21, and reading them is what the tool is worth.
 `knip` reports a surplus `export` *modifier*, not unreachable code: suites import
@@ -998,8 +995,9 @@ different things:
   ancestor, so a tag justifying one literal exempted an unrelated literal in the
   same function, which is a mute button with a reason attached.
 - **The exemption table** is for one fact whose single home a boundary forbids.
-  Today that is the refresh-token grammar: `packages/ceal-protocol` owns it and
-  is frozen, and the client SDK ships standalone and may not import the worker.
+  Today that is the refresh-token grammar: `@corca-ai/ceal-protocol` owns it and
+  arrives as a signed archive this repository does not edit, and the client SDK
+  ships standalone and may not import the worker.
 
 Neither is a mute button, and the table only stopped being one under
 falsification. Keyed by literal alone it exempted a *third* copy silently — the
@@ -1073,7 +1071,7 @@ Two constraints keep that gate real:
 - The type gate holds only while the table keeps `as const satisfies`, because
   the keys are read off *literal* route tuples. A row written
   `route: ["x"] as string[]` contributes no key, demands no handler, and
-  compiles. `dispatchedRouteKeys()` plus its `cli.test.mjs` gate is what catches
+  compiles. `dispatchedRouteKeys()` plus its `cli.test.ts` gate is what catches
   that, so the two are a pair — do not remove either as redundant.
 - Route-dependent behaviour belongs in the handler table too, not in a `boolean`
   beside it. `capabilities` kept its refusal label and option sets on a `targets`

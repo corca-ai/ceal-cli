@@ -56,7 +56,7 @@ separately approved boundaries.
   signed handoff is consumed; no live `ceal capabilities` target rendering is
   claimed from this checkout yet.
 - The Worker-owned part of `ceal-cli#14` is locally repaired without widening
-  frozen Protocol. Call, receipt, and acceptance YAML now distinguish Gateway
+  the vendored Protocol. Call, receipt, and acceptance YAML now distinguish Gateway
   audit readback from provider-state readback while retaining legacy tokens;
   unknown writes retain their exact request reference, while the guide tells
   agents to preserve their inputs and required idempotency key. They remain
@@ -73,21 +73,25 @@ separately approved boundaries.
   bounded subprocess and Unix-socket settlement, monotonic local-store waits,
   managed-install integrity, dependency-closure package hooks, bounded native
   and installer process probes, reduced guide-contract spawning, and the
-  directory skill carrier. Ship-facing asset merge now re-asserts the Protocol
-  quarantine before reading composed inputs. These are local source/test
-  results, not installed worker claims.
+  directory skill carrier. Ship-facing asset merge re-asserts the vendored
+  Protocol archive against the handoff lock before reading composed inputs.
+  These are local source/test results, not installed worker claims.
 - The next binary embeds the complete deterministic guide directory. Binary
   update is separate from explicit per-host `ceal guide register codex|claude`:
   guide materialization failure cannot reverse update success. A permanent
   self-contained compatibility asset keeps the immutable `0.76.1` installer
   able to cross directly without reinstall; that old binary cannot emit the new
   guide advisory, so read it from the updated command afterwards.
-- The frozen Protocol copy and client/worker dependencies retain reviewed local
-  `0.72.17` as a quarantined B1 development baseline. The current cross-repo
-  execution plan starts with the Gateway's `0.72.19` bump, allows S1-S5 packet
-  changes before one signed cut, and asks this repo for one consumer review at
-  that cut. The signed lock, release workflow, and installed worker remain on
-  `0.72.13`, so ship-facing builders and acceptance stay correctly refused.
+- The Protocol is no longer a vendored source tree. It arrives as the signed
+  archive `vendor/ceal-protocol/corca-ai-ceal-protocol-0.73.0.tgz` that
+  `gateway-protocol-handoff-lock.json` binds to
+  `gateway-protocol-handoff-v0.73.0`, and both packages consume it as a `file:`
+  dependency, so npm holds its bytes through the lockfile's `integrity` field.
+  `packages/ceal-protocol` and `protocol-vendor-pin.json` are deleted and the
+  quarantine they needed is discharged: proof/ship divergence has no constructor
+  any more, because what the gates test is the archive a release ships.
+  `npm run lint:protocol-artifact` is the whole check and runs in both gates.
+  `.github/workflows/ceal-release.yml` names the same tag and archive.
 - The release workflows now keep checkout/source proof outside privileged jobs
   and use the `ceal-cli-release` Environment only for release-origin credentials
   before worker publish or rollback activation. Same-run `github.sha` artifact
@@ -106,12 +110,11 @@ separately approved boundaries.
 - `npm run check:unit` is the aggregate development iteration gate. Its one
   checkout build is followed by the internal `test:contract:built` lane, while
   package behavior tests and `npm run check:protocol-dev` provide no-build
-  source feedback. The live Protocol vendor-pin checkout assertions belong to
-  the root `test:release` tier, not `check:unit`; separate reachability tests
-  prove the production ship guards refuse divergence before reading release
-  inputs or an installed binary. None of these local source/emitted checks is
-  installed-worker, release, or live-serving proof; the full gate, release
-  builders, packing, and acceptance stay blocked on the live diverged pin.
+  source feedback. The live Protocol artifact assertions belong to the root
+  `test:release` tier, not `check:unit`; separate reachability tests prove the
+  production ship guards refuse a mismatched or absent archive before reading
+  release inputs or an installed binary. None of these local source/emitted
+  checks is installed-worker, release, or live-serving proof.
 - Final-gate quality work made audit deadlines deterministic in tests without
   changing the production bound, removed discarded V8 coverage from receipt
   process-gate children, separated their exact exclusion oracle from production
@@ -119,19 +122,21 @@ separately approved boundaries.
   outcomes. Only the actual first-write race remains concurrent.
   The packed Protocol consumer now derives its guide digest from the same
   canonical directory bundle as both release builders; its focused release test
-  passes. The live package/native release positives still refuse the signed-pin
-  divergence as required.
+  passes. The live package/native release positives assert the vendored archive
+  against the lock before they build.
 - A post-`e695ac9` residual sweep closed four more local sibling gaps: acceptance
   now rejects unsafe request refs before release/session work, both acceptance
   emitters keep the declared receipt key set total with explicit nulls, the
   workspace dist-lock deadline is monotonic, and a bounded npm/tsc process-group
   supervisor settles timed-out builds before the lock is released. These remain
   checkout tests, not installed or release proof.
-- Protocol, client, and Worker CLI behavior tests no longer consume checkout
-  `dist`: they execute current TypeScript through one fail-closed direct/bare
-  workspace resolver, and Worker CLI subprocesses inherit the same resolver.
+- Client and Worker CLI behavior tests no longer consume checkout `dist`: they
+  execute current TypeScript through one fail-closed direct/bare workspace
+  resolver, and Worker CLI subprocesses inherit the same resolver. The Protocol
+  is outside that resolver because it has no source here; it resolves to the
+  vendored archive's `dist` like any other dependency.
   Emitted declarations, package exports, and the Worker executable are compiled
-  and inspected together in an isolated temp Protocol+Client+Worker artifact
+  and inspected together in an isolated temp client+Worker artifact
   workspace. Poisoned `dist`, immediate source mutation, orphan compiled-module
   mutations, and an unchanged checkout-dist fingerprint prove the authority
   boundary. Existing release package fixtures and the explicit root build still
@@ -141,26 +146,27 @@ separately approved boundaries.
 
 ## Next Action
 
-1. Wait for the one signed Gateway Protocol handoff cut after S0 and whichever
-   of S1-S5 land before that cut. Do not request or re-pin an intermediate packet
-   merely to restamp the quarantine.
-2. Review that exact artifact against the B1 response-depth, authority-key,
-   closed-enum, notification-binding, request-envelope, and consecutive-frame
-   proofs, plus the `ceal-cli#13` capability-specific target-selector and empty
-   match provenance contract; converge frozen tree, dependency, lock, pin,
-   generated contracts, and workflow input in one commit.
-3. Run the ordinary release gates and tag-resolved `0.78.1` installer crossing
+1. The signed `gateway-protocol-handoff-v0.73.0` cut is consumed: the lock, the
+   vendored archive, both `file:` dependencies, the generated contracts, and the
+   release workflow all name it. A successor is acquired with
+   `npm run bootstrap:gateway-handoff -- --tag <tag>` and landed as one coherent
+   slice per [release and enrollment](release-and-enrollment.md). There is no
+   vendored tree to converge and no pin to restamp.
+2. Run the ordinary release gates and tag-resolved `0.78.1` installer crossing
    plus explicit guide-register proof. Push, tag, publish, and install remain
    separately approved external boundaries. Do not enter per-release digest or
    commit variables; after the workflow change lands, remove the legacy
    approval variables once as GitHub configuration maintenance.
-4. Finish the worker-side D2 release named by the cross-repo plan. Installed-guide
+3. Finish the worker-side D2 release named by the cross-repo plan. Installed-guide
    dogfood remains a proof opportunity after serving, not a separately scheduled
    worker slice. Do not invent future Protocol or Gateway-owned fields in this repo.
 
 ## Non-Claims
 
-- No final signed Protocol handoff has been received or reviewed.
+- Consuming the signed `0.73.0` archive is artifact-identity proof and nothing
+  more. `npm run lint:protocol-artifact` binds local bytes to a local lock; it
+  does not re-verify the signature or prove anything about the live
+  `corca-ai/ceal` remote.
 - No current source change is signed, released, installed, selected by a
   Gateway, or proved against a live provider.
 - No signed Gateway capability-navigation handoff has been received or pinned;
@@ -181,9 +187,9 @@ separately approved boundaries.
 - See the [pre-handoff Worker contract](../charness-artifacts/spec/2026-08-11-pre-handoff-worker-closeout.md)
   for the scope of every `ceal-cli`-owned task that does not need the Gateway's
   final signed Protocol handoff.
-- See [Protocol quarantine](protocol-quarantine.md) for why the vendored
-  `packages/ceal-protocol` copy is a reviewed development baseline and not a
-  release input.
+- See [gate details](gates.md) for why the vendored Protocol is a signed archive
+  rather than an editable copy, and what the one remaining artifact check does
+  and does not prove.
 - See the [cross-repo release execution plan](../../ceal/docs/next-release-execution-plan.md)
   for who does what, in which repository, and in what order.
 - See [release and enrollment](release-and-enrollment.md) for the standing

@@ -1,7 +1,3 @@
-import {
-	decodeCealLeasedConsumerDispositionControlRequest,
-	decodeCealLeasedConsumerDispositionControlResponse,
-} from "../../packages/ceal-protocol/src/leased-consumer-disposition-control.ts";
 import { isJsonRecord as isRecord } from "../../packages/ceal-worker-cli/src/json-record.ts";
 import { openLeasedConsumerControlSession } from "../../packages/ceal-worker-cli/src/leased-consumer-control-session.ts";
 import {
@@ -9,9 +5,14 @@ import {
 	projectVerifiedControlConformanceRoutes,
 	readControlSessionContract,
 } from "../../scripts/generate-leased-consumer-handoff-runtime.ts";
+import { projectStagedWorkerControlSession } from "../../scripts/project-staged-worker-control-session.ts";
+import {
+	decodeCealLeasedConsumerDispositionControlRequest,
+	decodeCealLeasedConsumerDispositionControlResponse,
+} from "@corca-ai/ceal-protocol";
 import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
-import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import test from "node:test";
@@ -284,3 +285,68 @@ test("materialization forwarding keeps the protected session and signed fixed ro
 	);
 	assert.equal(calls.length, 1, "caller endpoint/header fields must fail before transport");
 });
+
+// `projectStagedWorkerControlSession` is what the release packager runs against a
+// STAGED worker tree, as a subprocess — which is why it had no coverage at all: c8 in
+// the parent never sees the child. It is exported, so it can be driven directly.
+//
+// Only the refusal is pinned here, deliberately. A passing projection needs a
+// conformance carrying a valid signed v6 vector for every one of the shipped
+// contract's seven routes, and hand-building those would be asserting against my own
+// reconstruction of the Protocol's grammar rather than against the Protocol. The
+// refusal needs none of that and is the security-relevant half: it proves a
+// caller-chosen endpoint inside a signed request cannot be laundered into the route
+// table a shipped Worker speaks.
+test("staged control-session projection refuses a conformance the Protocol decoders reject", async (t) => {
+	const stage = mkdtempSync(path.join(tmpdir(), "ceal-staged-control-session-bad-"));
+	t.after(() => rmSync(stage, { recursive: true, force: true }));
+	mkdirSync(path.join(stage, "src", "generated"), { recursive: true });
+	writeFileSync(
+		path.join(stage, "leased-consumer-control-session-contract.json"),
+		`${JSON.stringify({ agent_ipc: {}, gateway: { routes: {} }, gateway_protocol_handoff: {} }, null, "\t")}\n`,
+	);
+	const conformancePath = path.join(stage, "control-conformance.json");
+	// A caller-chosen endpoint inside the signed request is exactly what the decoders
+	// exist to refuse; the projection must not launder it into a shipped route table.
+	const rejected = v6Conformance();
+	const [operation] = rejected.operations;
+	if (operation === undefined) throw new Error("fixture must carry one operation");
+	operation.request.endpoint = "/caller-selected";
+	writeFileSync(conformancePath, JSON.stringify(rejected));
+
+	await assert.rejects(
+		() =>
+			projectStagedWorkerControlSession({
+				workerStage: stage,
+				protocolModule: path.join(ROOT, "node_modules/@corca-ai/ceal-protocol/dist/index.js"),
+				controlConformance: conformancePath,
+				handoff: HANDOFF,
+			}),
+		/invalid_control_conformance/u,
+	);
+});
+
+function v6Conformance() {
+	return {
+		schema_version: "ceal.gateway_leased_consumer_control_conformance_handoff.v6",
+		operations: [
+			{
+				operation: "materialization",
+				path: "/api/ceal/agent/v1/control/materialization",
+				request: {
+					schema_version: "ceal.leased_consumer_capability_control_request.v6",
+					operation: "materialization",
+					input: { event_ref: "event:interop-1", lease_ref: "lease:interop-1", lease_fence: 1, result_ref: `result:${"f".repeat(64)}`, frame_index: 0 },
+				} as JsonRecord & { schema_version: string; operation: string; endpoint?: string },
+				response: {
+					schema_version: "ceal.leased_consumer_capability_control_response.v6",
+					operation: "materialization",
+					result: {
+						status: "frame",
+						frame: { schema_version: "ceal.result_materialization_frame.v1", kind: "chunk", slot: 0, chunk_index: 0, chunk_count: 1, bytes_base64: "ZG9jdW1lbnQ=" },
+					},
+				},
+			},
+		],
+	};
+}

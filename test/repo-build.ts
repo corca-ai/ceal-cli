@@ -72,10 +72,11 @@ export const REPO_ROOT = path.resolve(fileURLToPath(new URL("..", import.meta.ur
 //   - The lock spans the read, not just the build. Guarding only the build leaves
 //     exactly the original race — a process releases, starts packing, and the next
 //     process's `tsc` truncates the files being packed.
-//   - There is ONE lock for the whole workspace, not one per package. `tsc` for
-//     `ceal-client` resolves `@corca-ai/ceal-protocol` through the workspace link
-//     into `packages/ceal-protocol/dist`, so per-package locks would let the
-//     client's compile read a tree the protocol's compile is rewriting.
+//   - There is ONE lock for the whole workspace, not one per package. It no longer
+//     guards the Protocol -- that is an installed artifact now, already built, and
+//     nothing here rewrites it -- but the client and the Worker still compile against
+//     each other's output, so per-package locks would let one compile read a tree the
+//     other is rewriting.
 const BUILT = new Set();
 const LOCK = path.join(REPO_ROOT, "node_modules", ".cache", "ceal-test-workspace-dist.lock");
 const WAIT_TIMEOUT_MS = 600_000;

@@ -8,16 +8,28 @@ import { fileURLToPath } from "node:url";
 const SOURCE_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const FIXTURE_GATEWAY_COMMIT = "a".repeat(40);
 const FIXTURE_GATEWAY_TREE = "b".repeat(40);
+const FIXTURE_PROTOCOL_TREE = "e".repeat(40);
 
 /**
- * Build the smallest real Git checkout whose frozen Protocol copy, pin, and
+ * Build the smallest real Git checkout whose vendored Protocol artifact and
  * shipment lock agree. Contract tests use it to exercise post-guard behavior
  * without weakening the production guard or borrowing the live checkout's
  * current release-readiness state.
+ *
+ * The `diverged` option is gone with the tree it described. While the Protocol was
+ * an editable copy, "what we test" and "what we ship" were different objects that
+ * could disagree, and a fixture had to be able to construct that disagreement. The
+ * repository now consumes the signed archive itself, so proof and shipment are the
+ * same bytes and the diverged state has no constructor — not because this fixture
+ * declines to build it, but because there is nothing left to build it out of.
  */
-export function createProtocolRepoFixture({ acceptanceCli = false, diverged = false, releaseBuild = false } = {}) {
+export function createProtocolRepoFixture({ acceptanceCli = false, releaseBuild = false } = {}) {
 	const root = mkdtempSync(path.join(tmpdir(), "ceal-converged-protocol-"));
-	copy("packages/ceal-protocol", root);
+	const lock = JSON.parse(readFileSync(path.join(SOURCE_ROOT, "gateway-protocol-handoff-lock.json"), "utf8"));
+	// The REAL archive, copied byte-for-byte. A synthesized stand-in would not hash
+	// to `lock.protocol.sha256`, and rewriting the lock to match a stand-in would
+	// make every fixture-backed release test pass against bytes no release consumes.
+	copy(`vendor/ceal-protocol/${lock.protocol.filename}`, root);
 	copyOwnedPackage("packages/ceal-client", root, releaseBuild);
 	copyOwnedPackage("packages/ceal-worker-cli", root, releaseBuild);
 	copy("skills/ceal-guide", root);
@@ -32,7 +44,6 @@ export function createProtocolRepoFixture({ acceptanceCli = false, diverged = fa
 	}
 	mkdirSync(path.join(root, "docs", "requests"), { recursive: true });
 	writeFileSync(path.join(root, "docs", "requests", "README.md"), "# Fixture request\n");
-	if (diverged) writeFileSync(path.join(root, "docs", "protocol-quarantine.md"), "# Fixture quarantine\n");
 
 	if (acceptanceCli) {
 		copy("scripts", root);
@@ -40,35 +51,18 @@ export function createProtocolRepoFixture({ acceptanceCli = false, diverged = fa
 		copy("packages/ceal-worker-cli/dist", root);
 	}
 
+	// Only the producer identities are fixture values. `lock.protocol` is left
+	// untouched so the archive's digest still binds, which is what the gate checks.
+	lock.gateway.commit = FIXTURE_GATEWAY_COMMIT;
+	lock.gateway.tree = FIXTURE_GATEWAY_TREE;
+	lock.gateway.protocol_tree = FIXTURE_PROTOCOL_TREE;
+	writeJson(path.join(root, "gateway-protocol-handoff-lock.json"), lock);
+
 	runFixtureGit(root, ["init", "--quiet"]);
 	runFixtureGit(root, ["config", "user.name", "Ceal Contract Fixture"]);
 	runFixtureGit(root, ["config", "user.email", "fixture@invalid.example"]);
 	runFixtureGit(root, ["add", "."]);
-	runFixtureGit(root, ["commit", "--quiet", "-m", "fixture: seed protocol tree"]);
-	const protocolTree = runFixtureGit(root, ["rev-parse", "HEAD:packages/ceal-protocol"]);
-
-	const lock = JSON.parse(readFileSync(path.join(SOURCE_ROOT, "gateway-protocol-handoff-lock.json"), "utf8"));
-	lock.gateway.commit = FIXTURE_GATEWAY_COMMIT;
-	lock.gateway.tree = FIXTURE_GATEWAY_TREE;
-	lock.gateway.protocol_tree = protocolTree;
-	writeJson(path.join(root, "gateway-protocol-handoff-lock.json"), lock);
-
-	const pin = JSON.parse(readFileSync(path.join(SOURCE_ROOT, "protocol-vendor-pin.json"), "utf8"));
-	pin.source.commit = diverged ? "c".repeat(40) : FIXTURE_GATEWAY_COMMIT;
-	pin.source.tree = protocolTree;
-	pin.shipped.status = diverged ? "diverged" : "agreed";
-	pin.shipped.gateway_commit = FIXTURE_GATEWAY_COMMIT;
-	pin.shipped.protocol_tree = protocolTree;
-	if (diverged) {
-		pin.shipped.reason = "fixture divergence";
-		pin.shipped.disposition_owner = "fixture";
-		pin.shipped.disposition_request = "docs/protocol-quarantine.md";
-	} else {
-		delete pin.shipped.reason;
-		delete pin.shipped.disposition_owner;
-		delete pin.shipped.disposition_request;
-	}
-	writeJson(path.join(root, "protocol-vendor-pin.json"), pin);
+	runFixtureGit(root, ["commit", "--quiet", "-m", "fixture: seed vendored protocol artifact"]);
 	if (releaseBuild) {
 		const controlContractPath = path.join(root, "packages/ceal-worker-cli/leased-consumer-control-session-contract.json");
 		const controlContract = JSON.parse(readFileSync(controlContractPath, "utf8"));
@@ -78,17 +72,26 @@ export function createProtocolRepoFixture({ acceptanceCli = false, diverged = fa
 		controlContract.gateway_protocol_handoff.archive_sha256 = lock.archive.sha256;
 		writeJson(controlContractPath, controlContract);
 		generateLeasedConsumerHandoffRuntime({ repoRoot: root });
+		// Only this branch produces anything to commit. The second commit used to be
+		// unconditional because the pin was written after the first one; the pin is
+		// gone and the lock is now written before it, so an unconditional commit here
+		// fails outright on a clean tree rather than doing nothing.
+		runFixtureGit(root, ["add", "."]);
+		runFixtureGit(root, ["commit", "--quiet", "-m", "fixture: bind regenerated release contracts"]);
 	}
 
-	runFixtureGit(root, ["add", "."]);
-	runFixtureGit(root, ["commit", "--quiet", "-m", "fixture: bind converged protocol identity"]);
 	if (releaseBuild) {
 		for (const dependency of ["typescript", "yaml", "undici-types", "@types/node", "@typescript/old"])
 			copy(`node_modules/${dependency}`, root);
 	}
 	return {
 		root,
-		gateway: { repository: lock.gateway.repository, commit: lock.gateway.commit, tree: lock.gateway.tree, protocol_tree: protocolTree },
+		gateway: {
+			repository: lock.gateway.repository,
+			commit: lock.gateway.commit,
+			tree: lock.gateway.tree,
+			protocol_tree: FIXTURE_PROTOCOL_TREE,
+		},
 		cleanup: () => rmSync(root, { recursive: true, force: true }),
 	};
 }

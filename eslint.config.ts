@@ -26,10 +26,6 @@ export default tseslint.config(
 		ignores: [
 			"**/dist/**",
 			"**/node_modules/**",
-			// The frozen protocol copy is excluded for the same reason `biome.json`
-			// excluded it: a lint finding there is one this lane may not act on, and
-			// "just fix the lint error" is how a frozen copy drifts.
-			"packages/ceal-protocol/**",
 			"packages/ceal-worker-cli/src/generated/**",
 		],
 	},

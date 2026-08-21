@@ -98,6 +98,10 @@ function assertContractGateScriptShape(scripts: Record<string, string>) {
 	assertSourceLaneTestOwnership(built, PROJECTION_TEST);
 	const commonPhases = [
 		"npm run lint",
+		// The Protocol artifact gate sits here, before build and before every suite,
+		// because it answers whether the bytes this gate is about to prove are the
+		// signed ones. It runs in both chains so CI and .githooks/pre-push agree.
+		"npm run lint:protocol-artifact",
 		"npm run lint:secrets",
 		"npm run lint:import-hard-failures",
 		"npm run lint:no-legacy-mjs",
@@ -405,12 +409,23 @@ test("workflows that exercise release proofs retain historical tags", () => {
 // to route around. Both gates must carry it, or "green" means different things
 // depending on which command was typed.
 test("both gates run the linter, and the final gate runs every suite", () => {
-	// The claim is which package must not be a workspace, plus which three must
-	// be. An ordered deepEqual additionally fails on a legitimately added
-	// workspace, which is drift-reporting, not defect-reporting.
-	for (const owned of ["packages/ceal-protocol", "packages/ceal-client", "packages/ceal-worker-cli"]) {
+	// The claim is which packages must be workspaces, plus which must not. An
+	// ordered deepEqual additionally fails on a legitimately added workspace, which
+	// is drift-reporting, not defect-reporting.
+	for (const owned of ["packages/ceal-client", "packages/ceal-worker-cli"]) {
 		assert.ok(manifest.workspaces.includes(owned), `${owned} must be a workspace`);
 	}
+	// The Protocol is consumed as a signed tarball under `vendor/`. Re-adding it as
+	// a workspace would restore an editable source tree, which is the defect the
+	// cutover removed -- `a8b3b96` edited the old copy and forked wire semantics.
+	assert.ok(
+		!manifest.workspaces.includes("packages/ceal-protocol"),
+		"the Protocol is an installed signed artifact; a workspace entry would make it editable again",
+	);
+	assert.ok(
+		!existsSync(path.join(ROOT, "packages", "ceal-protocol")),
+		"corca-ai/ceal owns the Protocol source; a copy here would be editable again",
+	);
 	// `packages/ceal-operator-cli` used to sit here as a frozen non-workspace copy.
 	// `corca-ai/ceal` owns and has moved past it, so the copy is gone and the claim
 	// is now about the directory, not the workspace list: re-vendoring a stale fork
@@ -432,9 +447,12 @@ test("both gates run the linter, and the final gate runs every suite", () => {
 		manifest.scripts["build:worker"],
 		/^node scripts\/generate-leased-consumer-attachment-stream-runtime[.]ts && node scripts\/generate-leased-consumer-handoff-runtime[.]ts/u,
 	);
+	// Only the two AUTHORED packages are built. The Protocol arrives pre-built inside
+	// the signed tarball, so building it here would mean recompiling somebody else's
+	// release from source this repository deliberately no longer has.
 	assert.match(
 		manifest.scripts["build:worker"],
-		/node test\/repo-build[.]ts packages\/ceal-protocol packages\/ceal-client packages\/ceal-worker-cli$/u,
+		/node test\/repo-build[.]ts packages\/ceal-client packages\/ceal-worker-cli$/u,
 	);
 	for (const ownerPackage of ["packages/ceal-client", "packages/ceal-worker-cli"]) {
 		assert.match(manifest.scripts.coverage, new RegExp(`${ownerPackage} run coverage`, "u"));
@@ -492,7 +510,11 @@ test("Protocol, client, and worker behavior execute editable source while emitte
 	const artifactBuilder = read("test/artifact-workspace.ts");
 	assert.match(artifactBuilder, /mkdtempSync/u);
 	assert.doesNotMatch(artifactBuilder, /cpSync\([^\n]*["']dist["']/u, "isolated artifacts must not copy checkout dist as an input");
-	assert.match(artifactBuilder, /compile\("ceal-protocol"/u);
+	// The Protocol is unpacked, not compiled: it arrives pre-built inside the signed
+	// archive, and compiling a copy would prove something about a local recompilation
+	// rather than about the bytes a release consumes.
+	assert.match(artifactBuilder, /unpackVendoredProtocol\(/u);
+	assert.doesNotMatch(artifactBuilder, /compile\("ceal-protocol"/u);
 	assert.match(artifactBuilder, /compile\("ceal-client"/u);
 	assert.match(artifactBuilder, /compile\("ceal-worker-cli"/u);
 	const artifactProof = read("test/client-artifact.test.ts");
@@ -677,10 +699,13 @@ test("the linter and formatter both run, and both exclude the frozen package", a
 	// `format` did not, so losing it would have been silent.
 	assert.ok(config.rules?.["simple-import-sort/imports"], "import order must be enforced");
 
-	// What must hold is that the frozen package is not linted — asked of eslint
-	// directly rather than by matching an ignore pattern.
-	const frozen = "packages/ceal-protocol";
-	assert.equal(await linter.isPathIgnored(`${frozen}/src/index.ts`), true, `${frozen} must be excluded`);
+	// The `packages/ceal-protocol` exclusion that used to be asserted here is gone
+	// with the directory: an ignore for a path that cannot exist guards nothing, and
+	// the prohibition it stood in for is enforced above by the workspace and
+	// directory assertions. What still needs saying is that generated output stays
+	// unlinted -- that IS still reachable.
+	const generated = "packages/ceal-worker-cli/src/generated";
+	assert.equal(await linter.isPathIgnored(`${generated}/leased-consumer-handoff.ts`), true, `${generated} must be excluded`);
 	assert.equal(await linter.isPathIgnored("packages/ceal-worker-cli/src/index.ts"), false, "the linted tree must not be excluded");
 });
 
@@ -705,7 +730,6 @@ test("TypeScript 7 owns the main type gate and TypeScript 6 remains an explicit 
 	const typecheck = JSON.parse(read("tsconfig.typecheck.json"));
 	assert.equal(typecheck.compilerOptions.baseUrl, undefined);
 	assert.deepEqual(typecheck.compilerOptions.paths, {
-		"@corca-ai/ceal-protocol": ["./packages/ceal-protocol/src/index.ts"],
 		"@corca-ai/ceal": ["./packages/ceal-client/src/index.ts"],
 	});
 	assert.deepEqual(typecheck.compilerOptions.lib, ["ES2022"]);
@@ -714,7 +738,6 @@ test("TypeScript 7 owns the main type gate and TypeScript 6 remains an explicit 
 	assert.deepEqual(tools.compilerOptions.lib, ["ES2022"]);
 	assert.deepEqual(tools.compilerOptions.types, ["node"]);
 	assert.deepEqual(tools.compilerOptions.paths, {
-		"@corca-ai/ceal-protocol": ["./packages/ceal-protocol/src/index.ts"],
 		"@corca-ai/ceal": ["./packages/ceal-client/src/index.ts"],
 	});
 	const lock = JSON.parse(read("package-lock.json"));
@@ -1278,20 +1301,37 @@ test("the shipped version is derived from the manifests, not retyped into source
 	// private build input, the client and protocol are the published pair, and
 	// every consumer pins the vendored protocol exactly. A range here would let a
 	// release ship a package declaring one protocol while the lock binds another.
-	const protocol = JSON.parse(read("packages/ceal-protocol/package.json"));
+	// Reads the handoff lock, not a vendored package manifest. The lock is the
+	// signed identity, and after the tarball cutover it is the only non-authored
+	// place the consumed Protocol version exists.
+	const lock = JSON.parse(read("gateway-protocol-handoff-lock.json"));
 	assert.equal(manifests.worker.private, true, "the worker CLI is a build input, never a published package");
 	assert.equal(manifests.client.private, undefined, "the client SDK must stay publishable");
-	assert.equal(protocol.private, undefined, "the vendored protocol must stay publishable");
 	for (const [name, consumer] of [
 		["client", manifests.client],
 		["worker", manifests.worker],
 	]) {
+		// The PUBLISHED declaration stays an exact version, because these manifests
+		// travel: root `ceal` consumes the client as a tarball and supplies its own
+		// Protocol, and a `file:../../vendor/...` path would be unresolvable there.
 		assert.equal(
 			consumer.dependencies["@corca-ai/ceal-protocol"],
-			protocol.version,
-			`the ${name} must declare the vendored protocol version exactly`,
+			lock.protocol.version,
+			`the ${name} must declare the exact Protocol version the handoff lock binds`,
 		);
 	}
+	// This checkout's own install is redirected to the vendored archive instead, so
+	// nothing here resolves a Protocol the lock does not bind. Both halves are needed:
+	// the version alone would admit any bytes published under it, and the override
+	// alone would leave the published contract unstated.
+	assert.deepEqual(manifest.overrides, {
+		"@corca-ai/ceal-protocol": `file:vendor/ceal-protocol/${lock.protocol.filename}`,
+	});
+	assert.equal(
+		JSON.parse(read("package-lock.json")).packages["node_modules/@corca-ai/ceal-protocol"].resolved,
+		`file:vendor/ceal-protocol/${lock.protocol.filename}`,
+		"the lockfile must resolve the Protocol from the vendored archive, not a registry",
+	);
 
 	// No source file may carry the current version as a literal. Matching the
 	// *current* version rather than any version-shaped string is deliberate: test
