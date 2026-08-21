@@ -215,6 +215,50 @@ function readJsonRecord(value: string): Record<string, unknown> {
 	return record;
 }
 
+test("a pack that yields a directory instead of a tarball is refused as unsafe output", () => {
+	// The DISCRIMINATING case for `packPackage`'s `!lstatSync(artifact).isFile()`.
+	// A symlink cannot name that branch: `lstatSync` does not follow, so a symlink
+	// fails `isFile()` too -- which is why the trailing
+	// `|| lstatSync(artifact).isSymbolicLink()` operand could never evaluate true
+	// and only cost a second stat of the same path. A directory is not a symlink,
+	// so `!isFile()` is the only operand that can refuse it.
+	//
+	// The stub is what makes the branch reachable at all: `npm pack` does not
+	// produce a directory, so nothing short of controlling the pack step can put
+	// one where the artifact belongs. Measured: with `!isFile()` dropped, the
+	// readFileSync below it fails instead and the coded error changes.
+	const fixture = packedFixture;
+	const filename = "corca-ai-ceal-directory-artifact-0.0.0.tgz";
+	assert.throws(
+		() =>
+			buildWorkerReleasePackageFromDevelopmentInputs(
+				{ ...fixture, outputDirectory: path.join(fixture.root, "worker-package-directory-artifact") },
+				{
+					pack: (_command, packArgs) => {
+						const destination = requiredValue(
+							packArgs[packArgs.indexOf("--pack-destination") + 1],
+							"pack_destination",
+						);
+						mkdirSync(path.join(destination, filename), { recursive: true });
+						return {
+							status: 0,
+							stdout: JSON.stringify([
+								{
+									name: "@corca-ai/ceal",
+									version: "0.0.0",
+									filename,
+									integrity: `sha512-${"A".repeat(86)}==`,
+									shasum: "a".repeat(40),
+								},
+							]),
+						};
+					},
+				},
+			),
+		(error) => error instanceof WorkerReleasePackageError && error.code === "worker_package_pack_failed",
+	);
+});
+
 function assertMissingBuildDependency(fixture: WorkerReleasePackageFixture, outputName: string): void {
 	assert.throws(
 		() =>

@@ -610,6 +610,31 @@ test("merged worker release sets stay pair-complete with byte-identical shared a
 	);
 });
 
+test("merge refuses a directory standing where a composed asset belongs", async (context) => {
+	// The DISCRIMINATING case for `readStagedFile`'s `!lstatSync(file).isFile()`.
+	// A symlink cannot name that branch: `lstatSync` does not follow, so a symlink
+	// fails `isFile()` too, which is why the trailing
+	// `|| lstatSync(file).isSymbolicLink()` operand beside it could never evaluate
+	// true and cost a second stat of the same path. A directory is not a symlink,
+	// so `!isFile()` is the only operand that can refuse it. Measured: with that
+	// operand dropped the suite stayed green -- the branch had no test at all.
+	const root = realpathSync(mkdtempSync(path.join(tmpdir(), "ceal-worker-assets-directory-asset-")));
+	context.after(() => rmSync(root, { recursive: true, force: true }));
+	const repoRoot = fixtureRepo(root);
+	const input = path.join(root, "assets-linux-arm64");
+	await composeWorkerReleaseAssets(
+		{ outputDirectory: input, gatewayHandoffArchive: "/unused/fixture.tar.gz", repoRoot },
+		{ buildNative: fakeNativeBuild("linux-arm64", "0.65.0") },
+	);
+	const manifest = path.join(input, "ceal-worker-release-manifest-linux-arm64.json");
+	rmSync(manifest);
+	mkdirSync(manifest, { recursive: true });
+	assert.throws(
+		() => mergeWorkerReleaseAssetSets({ outputDirectory: path.join(root, "merged"), inputs: [input], repoRoot }),
+		hasCode("merge_input_incomplete"),
+	);
+});
+
 test("merge rejects duplicate checksum entries within one input set", async (context) => {
 	const root = realpathSync(mkdtempSync(path.join(tmpdir(), "ceal-worker-assets-duplicate-")));
 	context.after(() => rmSync(root, { recursive: true, force: true }));

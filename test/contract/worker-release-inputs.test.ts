@@ -81,6 +81,52 @@ function resolveContractInputs(options: ContractInputOptions) {
 // future artifact consumption fail here for a reason that has nothing to do with
 // the code under test.
 const VENDORED_PROTOCOL_VERSION = JSON.parse(readFileSync(path.join(ROOT, "gateway-protocol-handoff-lock.json"), "utf8")).protocol.version;
+test("signed Protocol source acquisition refuses an extracted tree carrying a FIFO", (context: TestContext) => {
+	// The DISCRIMINATING case for `assertRegularTree`'s
+	// `(!entry.isDirectory() && !entry.isFile())`, and the ONE site in this family
+	// where a directory or a regular file cannot serve as the input: both satisfy
+	// that operand, and a symlink is caught by `entry.isSymbolicLink()` before it.
+	// A FIFO is none of the three -- irregular without being a symlink, a
+	// directory, or a file -- so it is the only input that reaches this operand and
+	// nothing else. `mkfifo` is already this repository's idiom for that (see
+	// `script-lib.test.ts` and the `knip.json` ignoreBinaries entry); Node cannot
+	// make one.
+	//
+	// This is also what retires the removed THIRD operand, `lstatSync(target)
+	// .isSymbolicLink()`: it re-asked the question `entry.isSymbolicLink()` had
+	// already answered, so it could only be true when the FIRST operand was
+	// already true, and it cost one extra stat per entry.
+	const scratch = scratchDir(context, "ceal-signed-protocol-source-fifo-");
+	const commit = "a".repeat(40);
+	const tree = "b".repeat(40);
+
+	const staging = path.join(scratch, "staging");
+	const protocolDirectory = path.join(staging, "packages", "ceal-protocol");
+	mkdirSync(protocolDirectory, { recursive: true });
+	writeFileSync(path.join(protocolDirectory, "index.ts"), "export {};\n");
+	execFileSync("mkfifo", [path.join(protocolDirectory, "channel")]);
+	const tarBytes = execFileSync("tar", ["-cf", "-", "-C", staging, "packages"], { maxBuffer: 32 * 1024 * 1024 });
+
+	const git = (_command: string, args: string[]) => {
+		if (args[0] === "init" || args[0] === "fetch") return Buffer.alloc(0);
+		if (args[0] === "rev-list") return `${commit}\n`;
+		if (args[0] === "rev-parse") return `${tree}\n`;
+		if (args[0] === "ls-tree") return `100644 blob ${"c".repeat(40)}\tpackages/ceal-protocol/index.ts\n`;
+		throw new Error(`unexpected_git_call:${args[0]}`);
+	};
+
+	const outputDirectory = path.join(scratch, "published", "ceal-protocol");
+	assert.throws(
+		() =>
+			materializeSignedGatewayProtocolSource(
+				{ tag: "gateway-protocol-handoff-v0.72.21", commit, protocolTree: tree, outputDirectory },
+				{ git, archive: () => tarBytes },
+			),
+		/signed_protocol_source_inventory_unsafe/u,
+	);
+	assert.equal(existsSync(outputDirectory), false, "an unsafe tree must not be published");
+});
+
 test("signed Protocol source acquisition writes nothing before exact commit and tree verification", (context: TestContext) => {
 	const scratch = scratchDir(context, "ceal-signed-protocol-source-mutation-");
 	const outputDirectory = path.join(scratch, "published", "ceal-protocol");
