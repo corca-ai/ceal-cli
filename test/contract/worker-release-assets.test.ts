@@ -212,6 +212,32 @@ test("output directory refuses a relative path before resolving it", () => {
 	);
 });
 
+test("output directory refuses a regular file standing where the directory belongs", (context) => {
+	// The DISCRIMINATING case for `!lstatSync(directory).isDirectory()`, and the
+	// reason a symlink case cannot stand in for it. A symlink never even reaches
+	// this line -- `assertNoSymlinkComponents` walks every component including the
+	// leaf and refuses it earlier, with a different message. A regular file is
+	// neither a symlink nor a directory, so this branch is the only thing that can
+	// refuse it. Measured: with the branch dropped, the suite stayed green.
+	const root = mkdtempSync(path.join(tmpdir(), "ceal-output-directory-file-"));
+	context.after(() => rmSync(root, { recursive: true, force: true }));
+	const occupied = path.join(root, "output");
+	writeFileSync(occupied, "");
+	assert.throws(
+		() =>
+			inspectOutputDirectory(occupied, {
+				repoRoot: REPO_ROOT,
+				force: false,
+				subject: "Worker release assets output",
+				marker: ".ceal-worker-release-assets",
+				fail: (code: string, message: string): never => {
+					throw new Error(`${code}:${message}`);
+				},
+			}),
+		/unsafe_output/u,
+	);
+});
+
 test("forced publish restores the marked output when staging rename fails", (context) => {
 	const root = realpathSync(mkdtempSync(path.join(tmpdir(), "ceal-output-publish-restore-")));
 	context.after(() => rmSync(root, { recursive: true, force: true }));

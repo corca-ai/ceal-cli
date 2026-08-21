@@ -54,8 +54,14 @@ export function inspectOutputDirectory(
 		fail("unsafe_output", `${subject} is too broad.`);
 	assertNoSymlinkComponents(directory, fail, subject);
 	if (!existsSync(directory)) return { directory, force: false };
-	if (!lstatSync(directory).isDirectory() || lstatSync(directory).isSymbolicLink())
-		fail("unsafe_output", `${subject} must be a regular directory.`);
+	// A trailing `|| lstatSync(directory).isSymbolicLink()` operand stood here and
+	// was dead twice over. `assertNoSymlinkComponents` above walks EVERY component
+	// of the path including the leaf, so a symlink at `directory` already failed
+	// there with a different message and never reached this line at all; and even
+	// if it had, `lstatSync` does not follow, so a symlink reports
+	// `isDirectory() === false` and is refused by the operand that remains.
+	// It also cost a second `lstatSync` of the same path.
+	if (!lstatSync(directory).isDirectory()) fail("unsafe_output", `${subject} must be a regular directory.`);
 	const markerPath = path.join(directory, marker);
 	if (!force || !existsSync(markerPath) || lstatSync(markerPath).isSymbolicLink())
 		fail("output_not_replaceable", `Use --force only with a marked ${subject.toLowerCase()}.`);

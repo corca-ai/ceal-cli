@@ -272,7 +272,10 @@ function staleLockOwner(
 	} catch {
 		return Date.now() - lock.mtimeMs < LOCK_INITIALIZATION_GRACE_MS ? "initializing" : { invalidGeneration: lockGeneration(lock) };
 	}
-	if (!owner.isFile() || owner.isSymbolicLink() || (owner.mode & 0o077) !== 0) options.onUnsafe();
+	// `lstatSync` does not follow, so a symlink already fails `isFile()`; the
+	// `|| owner.isSymbolicLink()` operand that stood here could never evaluate
+	// true. The mode test is permission bits, not S_IFMT, so it does not revive it.
+	if (!owner.isFile() || (owner.mode & 0o077) !== 0) options.onUnsafe();
 	// An owner record with the right shape and the right mode but unreadable
 	// content is a holder that died between creating the file and writing it —
 	// the same abandonment as a missing owner file, and reclaimable on the same

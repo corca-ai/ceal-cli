@@ -270,6 +270,33 @@ test("a lock directory or owner record readable beyond its owner is refused", as
 	});
 });
 
+test("an owner record that is a directory rather than a file is refused", async () => {
+	await withStore(async (directory) => {
+		const lockPath = options(directory).lockPath;
+		mkdirSync(lockPath, { mode: 0o700 });
+		// A directory-shaped owner record, which nothing covered before. The mode is
+		// 0o700 so the permission operand cannot be what refuses it, and the lock is
+		// aged past the initialization grace so this is the abandonment path rather
+		// than a holder mid-write.
+		//
+		// What this test does NOT do, stated because the comment above it nearly
+		// claimed otherwise: it does not DISCRIMINATE `!owner.isFile()`. Measured
+		// twice -- dropping that operand leaves this test green, because a
+		// directory-shaped record that `readLockOwner` cannot parse is refused again
+		// further down the reclaim path, with the same `onUnsafe`. So this asserts
+		// that the store refuses the shape, not which branch refuses it. Finding an
+		// input only `!owner.isFile()` can refuse is open work; every non-file
+		// record found so far is also caught downstream.
+		mkdirSync(path.join(lockPath, "owner.json"), { mode: 0o700 });
+		const old = new Date(Date.now() - 60_000);
+		utimesSync(lockPath, old, old);
+		await assert.rejects(
+			withLocalStoreLock(options(directory), async () => {}),
+			TestUnsafe,
+		);
+	});
+});
+
 test("a holder whose lock was reclaimed does not delete its successor's", async () => {
 	await withStore(async (directory) => {
 		const lockPath = options(directory).lockPath;
