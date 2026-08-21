@@ -48,9 +48,11 @@ export function safeExistingFile(directory: string, file: string, requireFileMod
 		// store's assertDirectory, because the explicit-gateway path reaches this
 		// function without running that store at all. A wider-mode directory
 		// soft-fails to a live probe rather than being trusted.
-		if (dir.isSymbolicLink() || !dir.isDirectory() || permissionMode(dir) !== DIRECTORY_MODE) return false;
+		// Five guards in this file dropped a redundant `isSymbolicLink()` operand:
+		// `lstatSync` does not follow, so the type test alone refuses a symlink.
+		if (!dir.isDirectory() || permissionMode(dir) !== DIRECTORY_MODE) return false;
 		const stat = lstatSync(file);
-		if (stat.isSymbolicLink() || !stat.isFile()) return false;
+		if (!stat.isFile()) return false;
 		// `requireFileMode: false` is for a caller that is about to *rewrite* this
 		// file at 0o600 and would otherwise discard its contents over a mode bit.
 		// It stays safe because the directory check above is unconditional: inside a
@@ -102,7 +104,7 @@ export function assertDirectory(directory: string, unsafe: UnsafeStore, requireM
 }
 
 function assertDirectoryStat(stat: Stats, unsafe: UnsafeStore, requireMode: boolean): void {
-	if (stat.isSymbolicLink() || !stat.isDirectory()) unsafe();
+	if (!stat.isDirectory()) unsafe();
 	if (requireMode && permissionMode(stat) !== DIRECTORY_MODE) unsafe();
 }
 
@@ -121,7 +123,7 @@ export function assertDirectoryIfPresent(directory: string, unsafe: UnsafeStore,
 /** Refuses `file` unless it is a real file, and 0o600 if required. */
 export function assertFile(file: string, unsafe: UnsafeStore, requireMode = false): void {
 	const stat = lstatSync(file);
-	if (stat.isSymbolicLink() || !stat.isFile()) unsafe();
+	if (!stat.isFile()) unsafe();
 	if (requireMode && permissionMode(stat) !== FILE_MODE) unsafe();
 }
 
@@ -173,7 +175,7 @@ export function removeOwnedFile(directory: string, file: string, unsafe: UnsafeS
 			const namedFile = existingPathOperation(() => lstatSync(anchoredFile()), unsafe);
 			if (!namedFile.found) return false;
 			const named = namedFile.value;
-			if (named.isSymbolicLink() || !named.isFile() || named.dev !== opened.dev || named.ino !== opened.ino) unsafe();
+			if (!named.isFile() || named.dev !== opened.dev || named.ino !== opened.ino) unsafe();
 			const unlinked = existingPathOperation(() => unlinkSync(anchoredFile()), unsafe);
 			if (!unlinked.found) return false;
 			return true;

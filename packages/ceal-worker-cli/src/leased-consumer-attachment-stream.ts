@@ -243,7 +243,9 @@ async function assertFreshOwnerOnlyRoot(root: string): Promise<void> {
 
 async function assertOwnerOnlyDirectory(directory: string): Promise<void> {
 	const stat = await lstat(directory);
-	if (!stat.isDirectory() || stat.isSymbolicLink() || (stat.mode & 0o077) !== 0) fail("unsafe_handoff_root");
+	// `lstat` does not follow, so a symlink already fails `isDirectory()`; the
+	// `|| stat.isSymbolicLink()` operand that stood here could never decide.
+	if (!stat.isDirectory() || (stat.mode & 0o077) !== 0) fail("unsafe_handoff_root");
 }
 
 async function writeCreateOnly(filePath: string, bytes: Uint8Array): Promise<void> {

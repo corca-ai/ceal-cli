@@ -244,7 +244,10 @@ function assertQuarantine(options: LocalStoreLockOptions, quarantine: () => stri
 	} catch {
 		options.onUnsafe();
 	}
-	if (!stat.isDirectory() || stat.isSymbolicLink() || (stat.mode & 0o077) !== 0) options.onUnsafe();
+	// Redundant `stat.isSymbolicLink()` dropped, as at `staleLockOwner` below: a
+	// symlink already fails `isDirectory()` under `lstatSync`, and the mode test is
+	// permission bits rather than S_IFMT.
+	if (!stat.isDirectory() || (stat.mode & 0o077) !== 0) options.onUnsafe();
 	if ("nonce" in owner) {
 		const quarantinedOwner = readLockOwner(quarantine);
 		if (!quarantinedOwner || quarantinedOwner.pid !== owner.pid || quarantinedOwner.nonce !== owner.nonce) options.onUnsafe();
@@ -304,7 +307,7 @@ function readSafeLockDirectory(options: LocalStoreLockOptions): Stats | null {
 		if (nodeErrorCode(error) === "ENOENT") return null;
 		options.onUnsafe();
 	}
-	if (!lock.isDirectory() || lock.isSymbolicLink() || (lock.mode & 0o077) !== 0) options.onUnsafe();
+	if (!lock.isDirectory() || (lock.mode & 0o077) !== 0) options.onUnsafe();
 	return lock;
 }
 
