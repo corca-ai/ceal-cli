@@ -1,4 +1,5 @@
 /* global process */
+import "../../../test/require-source-lane.ts";
 import type { CealStableUpdateProgressStage, CealWorkerPlatform } from "../dist/cli-runtime.js";
 import { resolveInstalledWorkerRelease } from "../dist/managed-worker-install.js";
 import { sha256 } from "../dist/sha256.js";

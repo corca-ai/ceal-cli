@@ -1,3 +1,4 @@
+import "../../../test/require-source-lane.ts";
 import { required as requiredValue,requiredCapture } from "../../../test/required.ts";
 import type { CealDiscoveryCacheKey } from "../dist/discovery-cache.js";
 import { createCealDiscoveryCacheStore, DEFAULT_DISCOVERY_CACHE_TTL_MS, discoveryCacheEntryUsable } from "../dist/discovery-cache.js";

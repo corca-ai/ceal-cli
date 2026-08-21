@@ -1,4 +1,5 @@
 import { resolveWorkspaceSourceAuthority, WORKSPACE_PACKAGE_DIRECTORIES } from "../scripts/lib/workspace-source-authority.ts";
+import { markSourceLane } from "./source-lane.ts";
 import { transformSync } from "esbuild";
 import { existsSync, readFileSync, realpathSync } from "node:fs";
 import { type LoadHookSync, registerHooks,type ResolveHookSync } from "node:module";
@@ -93,3 +94,8 @@ const loadSourceTest: LoadHookSync = (url, context, nextLoad) => {
 };
 
 registerHooks({ resolve: resolveSourceTest, load: loadSourceTest });
+
+// Announce the lane to the suites that require it. This is set here rather than
+// in `run-source-tests.ts` because the two packages enter the lane differently
+// and only this module is common to both. See `test/source-lane.ts`.
+markSourceLane();

@@ -1,3 +1,4 @@
+import "../../../test/require-source-lane.ts";
 import { createCealDiscoveryCacheStore } from "../dist/discovery-cache.js";
 import { writeCealLocalStoreFile } from "../dist/local-store-file.js";
 import { createCealSessionStore } from "../dist/profile-store.js";

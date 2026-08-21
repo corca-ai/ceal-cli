@@ -1,3 +1,4 @@
+import "../../../test/require-source-lane.ts";
 import { resolveAnchoredDirectory } from "../dist/local-store-anchor.js";
 import { withLocalStoreLock } from "../dist/local-store-lock.js";
 import type { LocalStoreLockOptions } from "../src/local-store-lock.js";

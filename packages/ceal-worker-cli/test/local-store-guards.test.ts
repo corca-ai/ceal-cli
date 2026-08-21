@@ -1,3 +1,4 @@
+import "../../../test/require-source-lane.ts";
 import { assertDirectory, assertFile, prepareDirectory, removeOwnedFile, safeExistingFile } from "../dist/local-store-guards.js";
 import assert from "node:assert/strict";
 import { spawn } from "node:child_process";

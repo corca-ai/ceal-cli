@@ -1,3 +1,4 @@
+import "../../../test/require-source-lane.ts";
 import { required as requiredValue } from "../../../test/required.ts";
 import { CealDeviceProofError, generateCealDeviceProofKeyPair, signCealDeviceProof, verifyCealDeviceProof } from "../dist/device-proof.js";
 import assert from "node:assert/strict";

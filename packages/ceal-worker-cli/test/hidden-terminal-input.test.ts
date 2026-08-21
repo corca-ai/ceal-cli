@@ -1,3 +1,4 @@
+import "../../../test/require-source-lane.ts";
 import { readHiddenTerminalEnrollmentCode } from "../dist/hidden-terminal-input.js";
 import type { HiddenInputStatusStream, HiddenInputStream } from "../src/hidden-terminal-input.js";
 import assert from "node:assert/strict";

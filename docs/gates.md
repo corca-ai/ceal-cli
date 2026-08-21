@@ -270,6 +270,27 @@ The client and Worker `test` and `coverage` scripts therefore have no build
 lifecycle hook: a targeted behavior test observes current source or fails
 closed, never succeeds against a previous checkout build.
 
+That sentence used to be true only of invocations that went through the lane.
+A bare `node --test <suite>` bypasses it, and a Worker suite bypassed that way
+binds `../dist/*.js` for real: it PASSES against whatever the last build left on
+disk. On 2026-08-22 that silently voided two mutation-matrix verdicts, which had
+been read as findings before anyone noticed the emitted file was three days
+older than its source — the same root class as the 2026-08-13 clean-checkout
+reachability defect, "mutable local artifacts hid the defect".
+
+So every suite in both packages declares the lane it needs with one side-effect
+import, `test/require-source-lane.ts`, and `test/source-lane.ts` owns the marker
+that `test/source-loader.ts` sets when its hooks register. The marker is a
+`globalThis` symbol rather than an environment variable because several suites
+spawn child node processes, and an env marker would be inherited by a child with
+no loader — reintroducing the false pass. `test/contract/repo-gates.test.ts`
+pins both halves: that every suite declares it, and that a bare `node --test` on
+a `dist`-binding suite exits non-zero naming the lane. Both packages carry the
+rule even though only the Worker can bind stale output, because a client suite
+bypassed the lane dies on an unresolvable `./x.js` specifier that names neither
+the lane nor the command — and whether it dies at all depends on an accident of
+the module graph, since a leaf module with no internal imports runs standalone.
+
 That no-build source feedback is distinct from the root contract gate. The
 public `npm run test:contract` entry builds once, then delegates to
 `test:contract:built`, whose explicit source/artifact-delimited inventory runs

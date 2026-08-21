@@ -1,3 +1,4 @@
+import "../../../test/require-source-lane.ts";
 import { required as requiredValue } from "../../../test/required.ts";
 import type { CealAgentAuditState, CealAgentSessionEventsLookup } from "../dist/agent-audit.js";
 import {

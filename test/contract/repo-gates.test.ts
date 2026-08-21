@@ -527,6 +527,72 @@ test("Protocol, client, and worker behavior execute editable source while emitte
 	);
 });
 
+// The client half of the rule above is "never import dist". The worker half
+// cannot be, because those suites bind `../dist/*.js` on purpose -- it is the
+// specifier shape a consumer of the published package binds, and the loader
+// resolves it to source. That makes the lane, not the import, the thing that has
+// to be guaranteed: run one of those files without the loader and the import
+// silently binds whatever emitted output the last build left behind, so the
+// suite passes while testing code nobody edited.
+//
+// This is not a hypothetical. On 2026-08-22 a mutation matrix reported two guard
+// operands as untested, twice, from runs executing a three-day-old `dist`. Both
+// verdicts were void and nothing in the output said so. It is the same root class
+// as the 2026-08-13 clean-checkout reachability defect -- "mutable local
+// artifacts hid the defect" -- whose prevention covered the reachability walker
+// and stopped short of this lane.
+test("a package suite refuses to run outside the source lane", () => {
+	const suites = ["packages/ceal-worker-cli/test", "packages/ceal-client/test"].flatMap((directory) =>
+		filesUnder(directory, (name) => name.endsWith(".test.ts")),
+	);
+	assert.ok(suites.length > 0, "expected package suites; the census found none");
+	for (const file of suites) {
+		assert.match(
+			read(file),
+			/import "[.][.]\/[.][.]\/[.][.]\/test\/require-source-lane[.]ts";/u,
+			`${file} is resolved by the source lane and must declare it`,
+		);
+	}
+	// Both packages need the lane, for different reasons, and the rule covers both
+	// so that neither depends on an accident of the module graph. A worker suite
+	// binds `../dist/*.js` and would otherwise PASS against stale emitted output.
+	// A client suite binds `../src/*.ts`, which cannot bind stale output, but its
+	// modules import siblings as `./x.js` and nothing maps those outside the lane
+	// -- so it dies on an unresolvable specifier that names neither the lane nor
+	// the command. Measured: `client.test.ts` fails that way today, while
+	// `request-bounds.test.ts` happened to pass because its module is a leaf.
+	const distBinding = suites.filter((file) => /["'][.][.]\/dist\//u.test(read(file)));
+	assert.ok(distBinding.length > 0, "expected worker suites that bind checkout dist; the census found none");
+
+	// The structural half above only proves the line is present. This proves it
+	// BITES, which is the part a reader cannot verify by inspection.
+	//
+	// Two variables are stripped, for opposite failure modes, and both were
+	// measured rather than assumed:
+	//
+	// - NODE_OPTIONS, because this suite runs inside the lane and the child would
+	//   otherwise inherit `--import=.../source-loader.ts`, land in the lane, and
+	//   pass. That turns a fail-closed proof into a tautology.
+	// - NODE_TEST_CONTEXT, because node's own runner sets it for the process it
+	//   spawns per test file. A grandchild that inherits it switches to
+	//   child-reporter mode: it exits 0 and emits nothing, whatever the file does.
+	//   Measured -- with it inherited this assertion saw status 0 from a suite
+	//   that exits 1 from a shell, so the gate went red for a reason that had
+	//   nothing to do with the property under test.
+	const { NODE_OPTIONS: _laneLoader, NODE_TEST_CONTEXT: _runnerMode, ...cleanEnv } = process.env;
+	const bypassed = spawnSync(process.execPath, ["--test", requiredValue(distBinding[0], "dist_binding_suite")], {
+		cwd: ROOT,
+		encoding: "utf8",
+		env: cleanEnv,
+	});
+	assert.notEqual(bypassed.status, 0, "a bare `node --test` on a dist-binding suite must fail, not silently use dist");
+	assert.match(
+		`${bypassed.stdout}${bypassed.stderr}`,
+		/source lane/u,
+		"the refusal must name the lane and the command to use, not just crash",
+	);
+});
+
 // The third target. `scripts/` is the release lane's production code and was the
 // one owned tree with no coverage at all, so a guard nobody called looked exactly
 // like a guard everybody called. It is measured to make that difference visible

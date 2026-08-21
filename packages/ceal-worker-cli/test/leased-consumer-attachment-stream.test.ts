@@ -1,3 +1,4 @@
+import "../../../test/require-source-lane.ts";
 import {
 	CEAL_AGENT_ATTACHMENT_HANDOFF_MANIFEST_NAME,
 	CEAL_AGENT_ATTACHMENT_MATERIALIZATION_SCHEMA,

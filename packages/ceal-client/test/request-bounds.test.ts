@@ -1,3 +1,4 @@
+import "../../../test/require-source-lane.ts";
 import { acceptsJsonMediaType } from "../src/request-bounds.ts";
 import assert from "node:assert/strict";
 import test from "node:test";

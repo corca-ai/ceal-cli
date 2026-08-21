@@ -1,3 +1,4 @@
+import "../../../test/require-source-lane.ts";
 import { required as requiredValue } from "../../../test/required.ts";
 import {
 	LEASED_CONSUMER_ATTACHMENT_STREAM_CONTRACT_JSON,
