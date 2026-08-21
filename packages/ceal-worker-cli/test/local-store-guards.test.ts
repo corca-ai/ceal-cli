@@ -60,6 +60,32 @@ test("safeExistingFile never throws, so a store falls back to a live probe", (co
 	assert.equal(safeExistingFile(directory, path.join(directory, "no-such-file")), false);
 });
 
+test("a regular file as the store directory, or a directory as the entry, is refused", (context) => {
+	// The DISCRIMINATING pair for the two type tests in `safeExistingFile`, and
+	// the reason the symlink test below cannot stand in for either. `lstatSync`
+	// does not follow, so a symlink fails `isDirectory()` and `isFile()` too --
+	// which is exactly why the `isSymbolicLink()` operand that used to lead both
+	// conditions could never decide anything.
+	const root = scratch(context);
+	const { directory, file } = store(root);
+
+	// A regular file where the directory belongs, at 0o700 ON PURPOSE: at any
+	// other mode the permission operand beside it would be what refuses, and the
+	// type test would still have no test of its own. Pairing it with the real
+	// file mirrors the symlinked-directory case below.
+	const fileAsDirectory = path.join(root, "store-is-a-file");
+	writeFileSync(fileAsDirectory, "", { mode: 0o700 });
+	chmodSync(fileAsDirectory, 0o700);
+	assert.equal(safeExistingFile(fileAsDirectory, file), false);
+
+	// A directory where the entry belongs, at 0o600 so the file-mode operand
+	// cannot be what refuses it either.
+	const directoryAsEntry = path.join(directory, "entry-is-a-directory");
+	mkdirSync(directoryAsEntry);
+	chmodSync(directoryAsEntry, 0o600);
+	assert.equal(safeExistingFile(directory, directoryAsEntry), false);
+});
+
 test("a symlinked directory or file is refused everywhere", (context) => {
 	const root = scratch(context);
 	const { directory, file } = store(root);
