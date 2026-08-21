@@ -553,7 +553,15 @@ async function runCapabilities(options: readonly string[], io: CealCliIo, runtim
 	if (!named || named.operands.length > 0) return writeCapabilitiesArgumentError(options, policy, io);
 	const wantsFresh = policy.acceptsFresh && named.flags.has("--fresh");
 	const wantsDetail = named.flags.has("--detail");
-	const effectiveOptions = routeOptions.filter((option) => option !== "--detail" && !(wantsFresh && option === "--fresh"));
+	// `--capability` narrows the catalog client-side, so it is stripped like the
+	// two flags above -- but it carries a value, and leaving either token behind
+	// would reach `parseGatewayOptions`, which does not declare it. The targets
+	// route sends its own `--capability` in the request body, so it is untouched.
+	const catalogCapability = policy.selectsTarget ? undefined : named.values.get("--capability");
+	if (catalogCapability !== undefined && !validCapabilityId(catalogCapability)) {
+		return writeCapabilitiesArgumentError(options, policy, io);
+	}
+	const effectiveOptions = withoutClientSideCapabilitiesOptions(routeOptions, wantsFresh, catalogCapability !== undefined);
 	const selection = policy.parse(effectiveOptions);
 	if (selection === null) return writeCapabilitiesArgumentError(options, policy, io);
 	const resolved =
@@ -571,7 +579,17 @@ async function runCapabilities(options: readonly string[], io: CealCliIo, runtim
 		// gate while the expensive discovery probe is served from the client cache
 		// when warm. The targets case is a live paged query and is never cached.
 		if (selection.kind === "catalog") {
-			return await serveCapabilityCatalog(resolved.value, handshake, client, selection, wantsFresh, wantsDetail, io, runtime);
+			return await serveCapabilityCatalog(
+				resolved.value,
+				handshake,
+				client,
+				selection,
+				wantsFresh,
+				wantsDetail,
+				catalogCapability,
+				io,
+				runtime,
+			);
 		}
 		const discovery = await withCealTiming(runtime.timing, "gateway_discovery", () =>
 			client.request({
@@ -586,7 +604,7 @@ async function runCapabilities(options: readonly string[], io: CealCliIo, runtim
 		if (selectorRefusal) {
 			return writeError("selector_not_supported", selectorRefusal.message, io, selectorRefusal.nextAction);
 		}
-		return writeCapabilitiesAvailable(handshake, discovery, selection, wantsDetail, io, { source: "live_discovery" }, runtime);
+		return writeCapabilitiesAvailable(handshake, discovery, selection, wantsDetail, undefined, io, { source: "live_discovery" }, runtime);
 	} catch (error) {
 		if (error instanceof CealClientSessionError) return writeClientSessionUnavailable(error.code, io);
 		const requestId = `${resolved.value.requestId}:${gatewayPhase === "handshake" ? "handshake" : "discover"}`;
@@ -609,6 +627,11 @@ async function serveCapabilityCatalog(
 	selection: { kind: "catalog" },
 	wantsFresh: boolean,
 	wantsDetail: boolean,
+	// Narrowing is applied to the rendered payload, never to the request or the
+	// cache: the cache key below does not include a filter, so a filtered
+	// discovery written under it would serve a truncated catalog to every later
+	// unfiltered call.
+	capabilityFilter: string | undefined,
 	io: CealCliIo,
 	runtime: CealCommandContext,
 ): Promise<number> {
@@ -631,6 +654,7 @@ async function serveCapabilityCatalog(
 				{ request_id: `${access.requestId}:discover:cached`, value: entry.discovery as unknown as CealGatewayDiscoveryValue },
 				selection,
 				wantsDetail,
+				capabilityFilter,
 				io,
 				{ source: "cached_discovery", cachedAt: entry.cachedAt, expiresAt: entry.cachedAt + ttlMs },
 				runtime,
@@ -652,7 +676,29 @@ async function serveCapabilityCatalog(
 			.saveDiscoveryCache({ key, cachedAt: now, discovery: discovery.value as unknown as Record<string, unknown> })
 			.catch(() => undefined);
 	}
-	return writeCapabilitiesAvailable(handshake, discovery, selection, wantsDetail, io, { source: "live_discovery" }, runtime);
+	return writeCapabilitiesAvailable(handshake, discovery, selection, wantsDetail, capabilityFilter, io, { source: "live_discovery" }, runtime);
+}
+
+// `--detail` and `--fresh` are value-less, but `--capability` is not, so its
+// argument has to be dropped with it. `parseNamedOptions` has already proved the
+// argv well-formed by this point, so a declared value option always has its
+// value in the next slot.
+function withoutClientSideCapabilitiesOptions(
+	routeOptions: readonly string[],
+	wantsFresh: boolean,
+	stripsCapability: boolean,
+): string[] {
+	const remaining: string[] = [];
+	for (let index = 0; index < routeOptions.length; index += 1) {
+		const option = routeOptions[index];
+		if (option === "--detail" || (wantsFresh && option === "--fresh")) continue;
+		if (stripsCapability && option === "--capability") {
+			index += 1;
+			continue;
+		}
+		remaining.push(option as string);
+	}
+	return remaining;
 }
 
 type ParsedTargetCatalogOptions =
@@ -663,7 +709,7 @@ type ParsedTargetCatalogOptions =
 // Every option each capabilities route declares, including the two this command
 // strips before the older parsers. Kept beside those parsers so a new option
 // cannot be accepted without also becoming nameable in a refusal.
-const CAPABILITIES_CATALOG_VALUE_OPTIONS = new Set(["--endpoint", "--profile", "--request-id"]);
+const CAPABILITIES_CATALOG_VALUE_OPTIONS = new Set(["--capability", "--endpoint", "--profile", "--request-id"]);
 const CAPABILITIES_CATALOG_FLAG_OPTIONS = new Set(["--token-stdin", "--fresh", "--detail"]);
 const CAPABILITIES_TARGETS_VALUE_OPTIONS = new Set(["--capability", "--cursor", "--limit", "--match", "--profile"]);
 const CAPABILITIES_TARGETS_FLAG_OPTIONS = new Set(["--detail"]);
@@ -979,12 +1025,33 @@ function writeCapabilitiesAvailable(
 	discovery: { request_id: string; value: CealGatewayDiscoveryValue },
 	selection: Exclude<ParsedTargetCatalogOptions, null>,
 	detail: boolean,
+	capabilityFilter: string | undefined,
 	io: CealCliIo,
 	provenance: CatalogProvenance,
 	runtime: CealCommandContext,
 ): number {
-	const capabilities = discovery.value.capabilities.map((capability) => renderedCapability(capability, detail));
-	const targets = renderCapabilityTargets(discovery.value.targets, discovery.value.capabilities);
+	// A filter matching nothing is a refusal, not an empty catalog. A mistyped id
+	// that renders a well-formed page with zero rows reads as "this session has
+	// no access", which is the wrong diagnosis and the expensive one to chase.
+	if (capabilityFilter !== undefined && !discovery.value.capabilities.some((capability) => capability.capability_id === capabilityFilter)) {
+		return writeError(
+			"selector_not_supported",
+			`This session's capability catalog does not contain '${capabilityFilter}'.`,
+			io,
+			"Run 'ceal capabilities' without --capability to list every capability this session may use.",
+		);
+	}
+	const capabilities = discovery.value.capabilities
+		.filter((capability) => capabilityFilter === undefined || capability.capability_id === capabilityFilter)
+		.map((capability) => renderedCapability(capability, detail));
+	// The renderer gets the FULL capability list on purpose: it throws on a target
+	// naming a capability absent from that list, so narrowing its input would
+	// crash on any target that also grants a filtered-out capability. Narrow the
+	// rendered rows instead.
+	const targets = renderCapabilityTargets(discovery.value.targets, discovery.value.capabilities).filter(
+		(target) =>
+			capabilityFilter === undefined || target.capability_access.some((access) => access.capability_id === capabilityFilter),
+	);
 	const targetSelection = targetSelectionProjection(selection);
 	const nextAction = capabilityCatalogNextAction(discovery.value.target_catalog, selection);
 	return writeYaml(io.stdout, {
@@ -1010,6 +1077,10 @@ function writeCapabilitiesAvailable(
 			...(handshake.value.eligible_profiles ? { eligible_profiles: handshake.value.eligible_profiles } : {}),
 		},
 		capabilities,
+		// A narrowed payload must say so. Without this an agent that pipes or
+		// caches the result cannot tell a one-capability session from a filtered
+		// view of a large one.
+		...(capabilityFilter ? { capability_filter: capabilityFilter } : {}),
 		targets,
 		// Tell an agent the concise rows omit the input grammar and how to get it,
 		// so a compact default never reads as "this capability has no contract".

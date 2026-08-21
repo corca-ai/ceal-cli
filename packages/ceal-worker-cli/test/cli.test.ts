@@ -4015,6 +4015,136 @@ test("capabilities --detail restores each capability's full input contract", asy
 	});
 });
 
+// `--capability` on the bare catalog route (#7). Two capabilities on two
+// different targets, so narrowing has something to remove on both axes.
+function twoCapabilityDiscovery(request: FixtureRequest): FixtureResponse {
+	const capability = (id: string, label: string) => ({
+		capability_id: id,
+		label,
+		effect: "read",
+		target_requirement: "required",
+		input_contract: { schema_version: `ceal.${id.replace(".", "_")}_input.v1`, required: ["query"], query: { type: "string", max_bytes: 512 } },
+		evidence_requirement: "gateway_audit",
+	});
+	const target = (ref: string, label: string, capabilityId: string) => ({
+		target_ref: ref,
+		label,
+		connector_kind: "slack",
+		target_kind: "conversation",
+		access: "granted",
+		capability_ids: [capabilityId],
+		capability_access: [
+			{ schema_version: "ceal.capability_access.v1", capability_id: capabilityId, grant_ref: `grant:${ref}`, grant_revision: 4, readiness: "ready" },
+		],
+	});
+	return success(request, {
+		schema_version: "ceal.gateway_discovery.v2",
+		profile_ref: request.profile_ref,
+		membership_ref: "membership:narnia",
+		capabilities: [capability("message.search", "Search messages"), capability("file.search", "Search files")],
+		targets: [target("target:team-inbox", "Team inbox", "message.search"), target("target:workspace", "Workspace", "file.search")],
+		target_catalog: { target_count: 2, returned_count: 2, complete: true },
+		host_decision: "accepted",
+		proof_level: "host_decision",
+		non_claims: ["provider_execution_not_reached", "production_audit_not_reached"],
+	});
+}
+
+function twoCapabilityGateway(request: FixtureRequest): FixtureResponse {
+	return request.operation === "handshake" ? handshakeResponse(request) : twoCapabilityDiscovery(request);
+}
+
+const CATALOG_FILTER_ARGS = ["--profile", "profile:narnia", "--request-id", "narnia:filter:001", "--token-stdin"] as const;
+const CATALOG_FILTER_SECRET = { readSecret: async () => `ceal_personal_${"F".repeat(43)}` };
+
+test("capabilities --capability narrows both the capability rows and the targets that grant it", async () => {
+	await withGateway(async ({ endpoint }) => {
+		const payload = await yamlRun(
+			["capabilities", "--capability", "message.search", "--endpoint", endpoint, ...CATALOG_FILTER_ARGS],
+			0,
+			CATALOG_FILTER_SECRET,
+		);
+		assert.equal(payload.status, "available");
+		assert.deepEqual(
+			payload.capabilities.map((item: { capability_id: string }) => item.capability_id),
+			["message.search"],
+		);
+		// The target granting only the filtered-out capability goes with it.
+		assert.deepEqual(
+			payload.targets.map((item: { target_ref: string }) => item.target_ref),
+			["target:team-inbox"],
+		);
+		// A narrowed payload has to say it is narrowed, or a piped copy of it
+		// misreports what the session may do.
+		assert.equal(payload.capability_filter, "message.search");
+	}, twoCapabilityGateway);
+});
+
+test("capabilities --capability refuses an id the catalog does not contain instead of rendering an empty page", async () => {
+	await withGateway(async ({ endpoint }) => {
+		const payload = await yamlRun(
+			["capabilities", "--capability", "message.nope", "--endpoint", endpoint, ...CATALOG_FILTER_ARGS],
+			2,
+			CATALOG_FILTER_SECRET,
+		);
+		assert.equal(payload.ok, false);
+		assert.equal(payload.error.kind, "selector_not_supported");
+		// Naming the id is the whole point: a zero-row page reads as "no access".
+		assert.match(payload.error.message, /message\.nope/u);
+		assert.match(payload.error.next_action, /without --capability/u);
+	}, twoCapabilityGateway);
+});
+
+test("capabilities --capability rejects a malformed id by naming the route, not by probing the Gateway", async () => {
+	await withGateway(async ({ endpoint, requests }) => {
+		const payload = await yamlRun(
+			["capabilities", "--capability", "NOT A CAPABILITY", "--endpoint", endpoint, ...CATALOG_FILTER_ARGS],
+			2,
+			CATALOG_FILTER_SECRET,
+		);
+		assert.equal(payload.error.kind, "invalid_argument");
+		// This assertion was green against a stale `dist/` for the wrong reason:
+		// an *undeclared* `--capability` also refuses with `invalid_argument`.
+		// Pin the distinction so the option must genuinely be declared.
+		assert.doesNotMatch(payload.error.message, /Unknown option/u);
+		assert.equal(requests.length, 0, "a malformed id must be refused before any Gateway request");
+	}, twoCapabilityGateway);
+});
+
+// The filter is applied to the rendered payload and never to the request,
+// because the discovery cache key carries no filter. If a filtered discovery
+// were ever cached under that key, every later unfiltered call would be served
+// a truncated catalog and would silently under-report the session's access.
+test("capabilities --capability does not poison the discovery cache for later unfiltered calls", async () => {
+	await withGateway(async ({ endpoint }) => {
+		let cached: CealDiscoveryCacheEntry | null = null;
+		const cacheRuntime = {
+			...CATALOG_FILTER_SECRET,
+			loadDiscoveryCache: async () => cached,
+			saveDiscoveryCache: async (value: CealDiscoveryCacheEntry) => {
+				cached = value;
+			},
+		};
+
+		const filtered = await yamlRun(
+			["capabilities", "--capability", "message.search", "--endpoint", endpoint, ...CATALOG_FILTER_ARGS],
+			0,
+			cacheRuntime,
+		);
+		assert.deepEqual(
+			filtered.capabilities.map((item: { capability_id: string }) => item.capability_id),
+			["message.search"],
+		);
+
+		const unfiltered = await yamlRun(["capabilities", "--endpoint", endpoint, ...CATALOG_FILTER_ARGS], 0, cacheRuntime);
+		assert.deepEqual(
+			unfiltered.capabilities.map((item: { capability_id: string }) => item.capability_id).sort(),
+			["file.search", "message.search"],
+		);
+		assert.equal(Object.hasOwn(unfiltered, "capability_filter"), false);
+	}, twoCapabilityGateway);
+});
+
 test("capabilities negotiates and surfaces the eligible-Profile catalog for --profile selection", async () => {
 	const eligible = [
 		{ profile_ref: "profile:ax-team", membership_ref: "membership:ax-team" },
