@@ -179,7 +179,7 @@ export function writeCallGatewayFailure(
 	requestId: string,
 	record?: CealCallResultRecorder,
 ): number {
-	const failure = classifyGatewayFailure(response.error);
+	const failure = classifyGatewayFailure(response.error, parsed.capabilityId);
 	const denial = failure.denial || isSafeGatewayPolicyDenial(response, parsed, requestId);
 	const proofRefs = isSafeGatewayProofRef(response.proof_ref_or_unavailable) ? [response.proof_ref_or_unavailable] : [];
 	emitCallResult(
@@ -330,6 +330,41 @@ const GATEWAY_NON_DENIAL_CODES = new Set([
 ]);
 const GATEWAY_DENIAL_RECOVERY_KINDS = new Set(["re_authenticate", "select_granted_scope", "request_approval"]);
 const GATEWAY_FALLBACK_NEXT_ACTION = "Check Gateway status and audit readback before deciding whether to retry.";
+
+/**
+ * Per-code local fallback text for the two target-catalog refusals.
+ *
+ * corca-ai/ceal-cli#14 item 4: a Gateway refusal that carries no text of its own
+ * degraded to ONE generic pair for every code, and for these two that generic
+ * pair is actively wrong. Neither refusal is fixed by checking Gateway status
+ * and retrying — the call named a target the catalog does not offer, or one it
+ * offers without this capability — so the generic action sends an agent to
+ * re-run an unchanged call instead of to the route that answers the question.
+ *
+ * Only these two are listed, because only these two name an operand the CLIENT
+ * can act on locally: which target to pick. Every other code stays generic
+ * rather than acquiring invented local advice about server-side state.
+ *
+ * The Gateway's own text still wins whenever it supplies safe text; this is
+ * only what to say when it supplied none.
+ */
+function gatewayCatalogFallback(code: string, capabilityId: string | null): { message: string; nextAction: string } | null {
+	// Named `<capability-id>` rather than dropped when the id is unknown, so the
+	// emitted line is always a command an agent can complete, never one that
+	// silently means something else if pasted as-is.
+	const capability = capabilityId ?? "<capability-id>";
+	if (code === "target_catalog_selection_invalid")
+		return {
+			message: "The Gateway refused the call because the named target is not a valid selection for this capability.",
+			nextAction: `Run 'ceal capabilities targets --capability ${capability}' to select a bounded target, then call again with one it lists.`,
+		};
+	if (code === "target_catalog_capability_not_granted")
+		return {
+			message: "The Gateway refused the call because this capability is not granted for the named target.",
+			nextAction: `Run 'ceal capabilities --capability ${capability}' to see which targets grant this capability, then call a granted target or request a grant for this one.`,
+		};
+	return null;
+}
 const MAX_GATEWAY_RETRY_AFTER_MS = 60 * 60 * 1000;
 // The Protocol decoder admits only bounded public-safe text here. A Gateway
 // recovery can name an opaque ref that is different for every write, so a local
@@ -400,15 +435,22 @@ function gatewayFailureDenial(recovery: SafeGatewayRecovery | null, code: string
 	return recovery !== null && GATEWAY_DENIAL_RECOVERY_KINDS.has(recovery.kind);
 }
 
-export function classifyGatewayFailure(error: unknown): SafeGatewayFailure {
+export function classifyGatewayFailure(error: unknown, capabilityId?: string): SafeGatewayFailure {
 	const safeError = isPlainRecord(error) ? error : null;
 	const code = gatewayFailureCode(safeError) ?? "gateway_request_failed";
 	const recovery = gatewayFailureRecovery(safeError);
 	const wait = recovery?.retryAfterMs === undefined ? {} : { retryAfterMs: recovery.retryAfterMs };
+	// The id is interpolated into rendered text, so it passes the same
+	// public-safe gate the Gateway's own text does before it is echoed.
+	const safeCapabilityId =
+		typeof capabilityId === "string" && isCealPublicSafeText(capabilityId, 128) && !containsCealCredential(capabilityId)
+			? capabilityId
+			: null;
+	const fallback = gatewayCatalogFallback(code, safeCapabilityId);
 	return {
 		code,
-		message: gatewayFailureText(safeError, "message") ?? "The Gateway rejected the capability request.",
-		nextAction: gatewayFailureText(safeError, "next_action") ?? GATEWAY_FALLBACK_NEXT_ACTION,
+		message: gatewayFailureText(safeError, "message") ?? fallback?.message ?? "The Gateway rejected the capability request.",
+		nextAction: gatewayFailureText(safeError, "next_action") ?? fallback?.nextAction ?? GATEWAY_FALLBACK_NEXT_ACTION,
 		denial: gatewayFailureDenial(recovery, code),
 		...wait,
 	};

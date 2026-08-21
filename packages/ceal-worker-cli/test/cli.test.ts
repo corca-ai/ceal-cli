@@ -969,10 +969,25 @@ test("a rejected capabilities option names the option and its own route's help",
 	assert.doesNotMatch(bogus.error.message, /target selection/u);
 
 	// The reporter's second case: a flag that is real, but on the subcommand.
-	const misplaced = await yamlRun(["capabilities", "--capability", "message.search"], 2);
-	assert.match(misplaced.error.message, /Unknown option '--capability' for 'ceal capabilities'/u);
+	//
+	// This case used to name `--capability`, and `2323849` (corca-ai/ceal-cli#7)
+	// made that spelling wrong without updating it: `--capability` is now a
+	// declared option of the BARE catalog route too, so it is accepted, the run
+	// proceeds, and the failure that arrives is `client_session_unavailable` at
+	// exit 3 rather than an unknown option at exit 2. The case is about a
+	// subcommand-only flag, so it now names one that still is: `--match` is in
+	// CAPABILITIES_TARGETS_VALUE_OPTIONS and deliberately not in
+	// CAPABILITIES_CATALOG_VALUE_OPTIONS (index.ts:712-714).
+	const misplaced = await yamlRun(["capabilities", "--match", "inbox"], 2);
+	assert.match(misplaced.error.message, /Unknown option '--match' for 'ceal capabilities'/u);
 	assert.equal(misplaced.error.next_action, "Run 'ceal capabilities --help'.");
 	assert.doesNotMatch(misplaced.error.message, /target selection/u);
+
+	// And the flag that #7 DID add is accepted by the bare route rather than
+	// reported as unknown — the contract that made the case above stale, pinned
+	// here so the two cannot drift apart silently again.
+	const declared = await yamlRun(["capabilities", "--capability", "message.search"], 3);
+	assert.notEqual(declared.error.kind, "invalid_argument");
 
 	// The same option on the route that declares it is not an unknown-option
 	// failure, and only that route may still speak of a target selection.
@@ -3156,6 +3171,87 @@ test("a safe Gateway action survives when the message is missing", () => {
 		nextAction: "Use the Gateway-issued confirmation reference.",
 		denial: false,
 	});
+});
+
+// corca-ai/ceal-cli#14 item 4. The generic fallback pair is right for a code
+// whose remedy is server-side, and wrong for the two the CLIENT can act on: a
+// target-catalog refusal is not fixed by checking Gateway status and retrying,
+// it is fixed by picking a different target. These four tests pin which codes
+// get local text, that the text names a real discovery route, and that the
+// Gateway still outranks it.
+test("a target-catalog refusal with no Gateway text names the route that lists valid targets", () => {
+	assert.deepEqual(classifyGatewayFailure({ code: "target_catalog_selection_invalid" }, "message.create"), {
+		code: "target_catalog_selection_invalid",
+		message: "The Gateway refused the call because the named target is not a valid selection for this capability.",
+		nextAction: "Run 'ceal capabilities targets --capability message.create' to select a bounded target, then call again with one it lists.",
+		denial: false,
+	});
+});
+
+test("an ungranted-capability refusal with no Gateway text names the route that shows grants", () => {
+	assert.deepEqual(classifyGatewayFailure({ code: "target_catalog_capability_not_granted" }, "message.create"), {
+		code: "target_catalog_capability_not_granted",
+		message: "The Gateway refused the call because this capability is not granted for the named target.",
+		nextAction:
+			"Run 'ceal capabilities --capability message.create' to see which targets grant this capability, then call a granted target or request a grant for this one.",
+		denial: true,
+	});
+});
+
+test("local catalog text never outranks the Gateway's own, and never leaks an unsafe capability id", () => {
+	// Gateway text present: the local pair must not appear at all.
+	assert.deepEqual(classifyGatewayFailure({ code: "target_catalog_selection_invalid", message: "server-controlled", next_action: "server-controlled action" }, "message.create"), {
+		code: "target_catalog_selection_invalid",
+		message: "server-controlled",
+		nextAction: "server-controlled action",
+		denial: false,
+	});
+	// An id that fails the public-safe gate degrades to the placeholder rather
+	// than being echoed into rendered output.
+	const unsafeCapability = `ceal_refresh_${"r".repeat(43)}`;
+	assert.equal(
+		classifyGatewayFailure({ code: "target_catalog_selection_invalid" }, unsafeCapability).nextAction,
+		"Run 'ceal capabilities targets --capability <capability-id>' to select a bounded target, then call again with one it lists.",
+	);
+	// No id at all still emits a completable command, not a truncated one.
+	assert.equal(
+		classifyGatewayFailure({ code: "target_catalog_capability_not_granted" }).nextAction,
+		"Run 'ceal capabilities --capability <capability-id>' to see which targets grant this capability, then call a granted target or request a grant for this one.",
+	);
+});
+
+test("only the two target-catalog codes acquire local text; every other refusal stays generic", () => {
+	for (const code of ["resource_not_available", "connector_unavailable", "rate_limited", "invalid_arguments", "authentication_failed", "duplicate_write_refused"]) {
+		const failure = classifyGatewayFailure({ code }, "message.create");
+		assert.equal(failure.message, "The Gateway rejected the capability request.", code);
+		assert.equal(failure.nextAction, "Check Gateway status and audit readback before deciding whether to retry.", code);
+	}
+});
+
+test("the call renderer threads its own capability id into the target-catalog action", () => {
+	let stdout = "";
+	const status = writeCallGatewayFailure(
+		{ error: { code: "target_catalog_selection_invalid" } },
+		{
+			stdout: {
+				write: (chunk) => {
+					stdout += String(chunk);
+				},
+			},
+		},
+		storedSession("http://127.0.0.1:1/gateway/client"),
+		{ ok: true, capabilityId: "message.create", targetRef: "target:not-in-catalog", arguments: {}, purpose: "Create" },
+		"request:catalog-selection",
+	);
+	assert.equal(status, 3);
+	const payload = parseYaml(stdout);
+	assert.equal(payload.status, "error");
+	assert.equal(payload.error.kind, "target_catalog_selection_invalid");
+	// The wiring is the point: an id known only to the caller reached the text.
+	assert.equal(
+		payload.error.next_action,
+		"Run 'ceal capabilities targets --capability message.create' to select a bounded target, then call again with one it lists.",
+	);
 });
 
 test("a direct Gateway failure renderer never reflects unsafe code, text, or proof refs", () => {
