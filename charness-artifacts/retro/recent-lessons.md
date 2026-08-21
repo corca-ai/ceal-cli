@@ -2,20 +2,22 @@
 
 ## Current Focus
 
+- This retro covers the Worker/client diagnostic-propagation slice after the O3 refresh observation: a bounded response shape now travels from the shared session exchange to the Worker refresh error, and a stale capability fixture was repaired when retained-path proof exposed it. (source: `charness-artifacts/retro/2026-08-21-session-retro.md`)
 - This retro covers the local Worker/Agent quality goal from activation through the closeout proof pass. (source: `charness-artifacts/retro/2026-08-19-session-retro.md`)
 
 ## Repeat Traps
 
-- One targeted Agent test was sent through `run-test-lanes.ts` even though the script test is not owned by that runner. The runner returned `source_test_not_owned`; the valid direct Node strip-types route then passed 17/17. This was a route-selection miss, not a test failure. (source: `charness-artifacts/retro/2026-08-19-session-retro.md`)
-- The first fresh-eye reviewer was spawned before the goal and checkout inputs were frozen. Subsequent goal edits made its line-based reading ambiguous, so the result was correctly discarded as drift evidence and a second bounded review was needed. This was avoidable verification rework, strong evidence. (source: `charness-artifacts/retro/2026-08-19-session-retro.md`)
-- The first generated Lane E baseline patch was a near miss: its initial key comparison was not lane-qualified and its comma handling could have produced invalid JSON. JSON parsing and an exact pre/post positive-key comparison caught both before any baseline commit, so there was no lasting data loss. The waste was reconstruction and repair of the patch shape, not a greened baseline. (source: `charness-artifacts/retro/2026-08-19-session-retro.md`)
-- The first Worker full gate also exposed a host-shaped timeout message mismatch in a retained fixture. The exact filtered test passed on immediate retry, so no production workaround was justified; the result remains a recorded non-determinism signal rather than an erased red. (source: `charness-artifacts/retro/2026-08-19-session-retro.md`)
+- The first combined Worker test run surfaced a retained capability fixture family returning `ceal.gateway_discovery.v2` while the decoder required v3. Treating those three reds as unrelated baseline debt would have taught the next session to rerun around a broken fixture. Updating the owned helper to v3 plus `phase: target_page` fixed the producer/consumer shape and all four selector tests passed. (source: `charness-artifacts/retro/2026-08-21-session-retro.md`)
+- The first focused raw-body assertion used the scalar text `false`, which also appeared in another serialized error field and produced a false red. Replacing it with a unique JSON string scalar repaired the test oracle itself before rerunning; the lesson is that negative retention sentinels must be unique, not merely valid. (source: `charness-artifacts/retro/2026-08-21-session-retro.md`)
+- The first lint run exposed two import-sort violations and one max-line violation introduced by the patch. They were repaired at the source span before any retry; no lint bypass was used. (source: `charness-artifacts/retro/2026-08-21-session-retro.md`)
+- The first root proof-runner invocation used `/home/ubuntu/ceal-cli/scripts/run-proof-job.ts`, which does not exist. The runner is owned by the Gateway repo at `/home/ubuntu/ceal/scripts/run-proof-job.ts`; the positive-control file search repaired the command before retrying. This was an ownership-resolution failure, not evidence that `check:unit` failed. (source: `charness-artifacts/retro/2026-08-21-session-retro.md`)
 
 ## Next-Time Checklist
 
+- configure the sibling retro adapter's auto-trigger keys only if the repo wants automatic surface-triggered retros; until then, treat `state: not-established` as a manual-retro decision, never as `triggered: false`. (source: `charness-artifacts/retro/2026-08-21-session-retro.md`)
+- resolve command ownership with a positive-control file search before any long proof retry; freeze reviewed source paths before delegating fresh-eye review; keep slow gates in the root proof runner; record an exact owner/debt disposition when a frozen contract lane fails. (source: `charness-artifacts/retro/2026-08-21-session-retro.md`)
+- update the active goal and sibling handoff after the sibling commit so the diagnostic slice, stale-fixture repair, live-readback non-claim, and no-new-PR boundary are all durable. (source: `charness-artifacts/retro/2026-08-21-session-retro.md`)
 - applied: freeze goal bytes, sibling HEADs, and evidence paths before every delegated review; require a clean result or an explicit drift disposition before editing again (source: `charness-artifacts/retro/2026-08-19-session-retro.md`)
-- applied: the active goal Claim Ledger now carries explicit sibling-root commands, baseline key-preservation checks, proof-job result paths, and the first-review drift non-claim (source: `charness-artifacts/retro/2026-08-19-session-retro.md`)
-- out-of-scope: upstream Charness should expose a closeout scaffold/shape path earlier; no plugin source or external issue was authorized in this local-only run (source: `charness-artifacts/retro/2026-08-19-session-retro.md`)
 
 ## Selection Policy
 
@@ -26,3 +28,4 @@
 ## Sources
 
 - `charness-artifacts/retro/2026-08-19-session-retro.md`
+- `charness-artifacts/retro/2026-08-21-session-retro.md`

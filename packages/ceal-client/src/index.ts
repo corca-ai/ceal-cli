@@ -38,6 +38,7 @@ export {
 } from "./http-transport.js";
 export type {
 	CealPersonalClientSessionClient,
+	CealPersonalClientSessionResponseShape,
 	CreateCealPersonalClientSessionClientOptions,
 } from "./personal-client-session-client.js";
 export {

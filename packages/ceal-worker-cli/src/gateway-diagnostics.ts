@@ -92,6 +92,7 @@ function safeHttpStatus(value: number | null | undefined): number | undefined {
 }
 
 function safeContentType(value: string): string {
+	// @separateGrammar: Gateway observations retain the legacy "unavailable" sentinel.
 	return /^[\u0020-\u007e]{1,128}$/u.test(value) ? value.toLowerCase() : "unavailable";
 }
 

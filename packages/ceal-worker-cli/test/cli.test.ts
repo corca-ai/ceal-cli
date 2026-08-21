@@ -1875,6 +1875,65 @@ test("ambiguous renewal response is recovered by reusing the durable refresh att
 	);
 });
 
+test("session refresh preserves a bounded Gateway response shape without changing its disposition", async () => {
+	for (const [jsonResponse, expectedShape] of [
+		[
+			true,
+			{
+				http_status: 500,
+				content_type: "application/json",
+				body_bytes: 42,
+				body_kind: "json_object",
+				body_keys: ["ok", "error_code"],
+				body_keys_truncated: false,
+				schema_version: null,
+				ok: false,
+				error_code: "internal_error",
+			},
+		],
+		[
+			false,
+			{
+				http_status: 500,
+				content_type: "text/plain",
+				body_bytes: new TextEncoder().encode("Gateway failure without the client JSON contract").byteLength,
+				body_kind: "non_json",
+				body_keys: [],
+				body_keys_truncated: false,
+				schema_version: null,
+				ok: null,
+				error_code: null,
+			},
+		],
+	] as const) {
+		await withRenewingGateway(
+			async ({ endpoint, oldRefreshToken }) => {
+				let current = storedSession(endpoint, { expiresAt: "2020-01-01T00:00:00.000Z", refreshToken: oldRefreshToken });
+				const payload = await yamlRun(["session", "refresh"], 3, {
+					readStoredSession: async () => current,
+					writeStoredSession: async (session) => {
+						current = session;
+					},
+				});
+				assert.equal(payload.error.kind, "session_refresh_attempt_unknown");
+				assert.equal(payload.error.retryable, true);
+				assert.equal(
+					payload.error.next_action,
+					"Retry 'ceal session refresh' with the preserved attempt journal; it will not create a second rotation attempt.",
+				);
+				assert.equal(payload.raw_token_visible, false);
+				assert.deepEqual(payload.error.response_shape, expectedShape);
+				assert.equal(current.refreshToken, oldRefreshToken);
+				assert.match(current.refreshAttemptRef ?? "", /^ceal_refresh_attempt_[A-Za-z0-9_-]{43}$/u);
+				assert.equal(current.renewalBlockedReason, "outcome_unknown");
+				assert.doesNotMatch(JSON.stringify(payload), new RegExp(oldRefreshToken, "u"));
+				assert.doesNotMatch(JSON.stringify(payload), /ceal_refresh_attempt_[A-Za-z0-9_-]{43}/u);
+			},
+			{ invalidRefreshResponse: true, invalidRefreshJsonResponse: jsonResponse },
+		);
+	}
+});
+
 test("capabilities reports a response-unknown refresh without issuing a second Gateway attempt", async () => {
 	await withRenewingGateway(
 		async ({ endpoint, oldRefreshToken, refreshCalls, requests }) => {
@@ -4397,7 +4456,8 @@ function twoCapabilityDiscovery(request: FixtureRequest): FixtureResponse {
 		],
 	});
 	return success(request, {
-		schema_version: "ceal.gateway_discovery.v2",
+		schema_version: "ceal.gateway_discovery.v3",
+		phase: "target_page",
 		profile_ref: request.profile_ref,
 		membership_ref: "membership:narnia",
 		capabilities: [capability("message.search", "Search messages"), capability("file.search", "Search files")],
@@ -5666,6 +5726,7 @@ async function withEnrollmentGateway(callback: EnrollmentGatewayCallback, option
 
 type RenewingGatewayOptions = {
 	invalidRefreshResponse?: boolean;
+	invalidRefreshJsonResponse?: boolean;
 	recoverAfterUnknown?: boolean;
 	refreshDeniedCode?: string;
 	invalidRevokeResponse?: boolean;
@@ -5735,8 +5796,11 @@ async function withRenewingGateway(callback: RenewingGatewayCallback, options: R
 				return;
 			}
 			if (options.invalidRefreshResponse && !(options.recoverAfterUnknown && refreshCallCount > 1)) {
-				response.writeHead(500, { "content-type": "text/plain" });
-				response.end("Gateway failure without the client JSON contract");
+				const invalidResponseBody = options.invalidRefreshJsonResponse
+					? JSON.stringify({ ok: false, error_code: "internal_error" })
+					: "Gateway failure without the client JSON contract";
+				response.writeHead(500, { "content-type": options.invalidRefreshJsonResponse ? "application/json" : "text/plain" });
+				response.end(invalidResponseBody);
 				return;
 			}
 			const result =

@@ -21,7 +21,13 @@ import {
 } from "./session-replacement.js";
 import { type CealSubcommandHandlers, resolveSubcommandRoute } from "./subcommands.js";
 import { withCealTiming } from "./timing.js";
-import { CealEnrollmentClientError, createCealEnrollmentClient, createCealPersonalClientSessionClient } from "@corca-ai/ceal";
+import {
+	CealEnrollmentClientError,
+	CealPersonalClientSessionError,
+	type CealPersonalClientSessionResponseShape,
+	createCealEnrollmentClient,
+	createCealPersonalClientSessionClient,
+} from "@corca-ai/ceal";
 import type { CealClientRefreshResult, CealClientRefreshResultV2 } from "@corca-ai/ceal-protocol";
 import { randomBytes } from "node:crypto";
 
@@ -135,7 +141,8 @@ async function runSessionRefresh(io: CealCliIo, runtime: CealCommandContext): Pr
 		const refreshed = await ensureCurrentSession(session, runtime, true);
 		return writeSessionRefreshed(io, refreshed);
 	} catch (error) {
-		return writeSessionRefreshUnavailable(io, error instanceof CealClientSessionError ? error.code : "session_refresh_failed");
+		const sessionError = error instanceof CealClientSessionError ? error : undefined;
+		return writeSessionRefreshUnavailable(io, sessionError?.code ?? "session_refresh_failed", sessionError?.response_shape);
 	}
 }
 
@@ -155,7 +162,7 @@ function writeSessionRefreshed(io: CealCliIo, session: CealStoredSession): numbe
 	return 0;
 }
 
-function writeSessionRefreshUnavailable(io: CealCliIo, reason: string): number {
+function writeSessionRefreshUnavailable(io: CealCliIo, reason: string, responseShape?: CealPersonalClientSessionResponseShape): number {
 	const failure =
 		reason === "session_unavailable"
 			? {
@@ -177,6 +184,7 @@ function writeSessionRefreshUnavailable(io: CealCliIo, reason: string): number {
 			retryable: failure.retryable,
 			message: failure.message,
 			next_action: failure.nextAction,
+			...(responseShape ? { response_shape: responseShape } : {}),
 		},
 	});
 	return 3;
@@ -467,7 +475,7 @@ async function clearLogoutDerivedState(dependencies: CealSessionCapabilityDepend
 }
 
 export class CealClientSessionError extends Error {
-	constructor(readonly code: string) {
+	constructor(readonly code: string, readonly response_shape?: CealPersonalClientSessionResponseShape) {
 		super("Ceal client session unavailable.");
 	}
 }
@@ -571,7 +579,10 @@ async function refreshSession(session: CealStoredSession, refreshToken: string, 
 		return await createCealPersonalClientSessionClient({ endpoint: session.gatewayEndpoint }).refresh(refreshToken, refreshAttemptRef);
 	} catch (error) {
 		const failure = clientSessionTransportFailure(error, "renewal");
-		throw new CealClientSessionError(failure === "session_renewal_unavailable" ? "session_refresh_attempt_unknown" : failure);
+		throw new CealClientSessionError(
+			failure === "session_renewal_unavailable" ? "session_refresh_attempt_unknown" : failure,
+			error instanceof CealPersonalClientSessionError ? error.response_shape : undefined,
+		);
 	}
 }
 

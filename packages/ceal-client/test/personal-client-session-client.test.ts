@@ -22,6 +22,7 @@ import test from "node:test";
 
 const REFRESH = `ceal_refresh_${"R".repeat(43)}`;
 const ATTEMPT = `ceal_refresh_attempt_${"T".repeat(43)}`;
+const ACCESS = `ceal_personal_${"A".repeat(43)}`;
 
 test("personal-client session client rotates and revokes only through derived Gateway routes", async () => {
 	const requests: Array<{ url: string | undefined; decodeGeneration: string | undefined; body: JsonRecord }> = [];
@@ -217,16 +218,248 @@ test("session client refuses non-2xx responses whose bodies claim success", asyn
 		["refresh", refreshResult()],
 		["revoke", { schema_version: "ceal.client_revoke_result.v1", ok: true, revoked: true }],
 	] as const) {
+		const body = JSON.stringify(success);
 		const client = createCealPersonalClientSessionClient({
 			endpoint: SESSION_ENDPOINT,
-			fetchFn: async () => globalThis.Response.json(success, { status: 500 }),
+			fetchFn: async () => new globalThis.Response(body, { status: 500, headers: { "content-type": "application/json" } }),
 		});
 		await assert.rejects(
 			() => invokeRoute(client, route),
-			(error) => error instanceof CealPersonalClientSessionError && error.code === "invalid_response",
+			(error) => {
+				if (!(error instanceof CealPersonalClientSessionError)) return false;
+				assert.equal(error.code, "invalid_response", route);
+				assert.deepEqual(
+					error.response_shape,
+					{
+						http_status: 500,
+						content_type: "application/json",
+						body_bytes: new TextEncoder().encode(body).byteLength,
+						body_kind: "json_object",
+						body_keys: Object.keys(success),
+						body_keys_truncated: false,
+						schema_version: success.schema_version,
+						ok: true,
+						error_code: null,
+					},
+					route,
+				);
+				return true;
+			},
 			route,
 		);
 	}
+});
+
+test("session client preserves bounded response shape without retaining the body", async () => {
+	const jsonBody = JSON.stringify({ ok: false, error_code: "internal_error", refresh_token: REFRESH, access_token: ACCESS });
+	const scalarBody = JSON.stringify("opaque scalar body 9fd2a8");
+	for (const [label, response, expected, rawBody] of [
+		[
+			"json error",
+			new globalThis.Response(jsonBody, { status: 500, headers: { "content-type": "application/json" } }),
+			{
+				http_status: 500,
+				content_type: "application/json",
+				body_bytes: new TextEncoder().encode(jsonBody).byteLength,
+				body_kind: "json_object",
+				body_keys: ["ok", "error_code", "refresh_token", "access_token"],
+				body_keys_truncated: false,
+				schema_version: null,
+				ok: false,
+				error_code: "internal_error",
+			},
+			jsonBody,
+		],
+		[
+			"malformed json",
+			new globalThis.Response("{not-json", { status: 502, headers: { "content-type": "application/json" } }),
+			{
+				http_status: 502,
+				content_type: "application/json",
+				body_bytes: new TextEncoder().encode("{not-json").byteLength,
+				body_kind: "malformed_json",
+				body_keys: [],
+				body_keys_truncated: false,
+				schema_version: null,
+				ok: null,
+				error_code: null,
+			},
+			"{not-json",
+		],
+		[
+			"non-json",
+			new globalThis.Response(`Gateway body ${REFRESH}`, { status: 502, headers: { "content-type": "text/plain" } }),
+			{
+				http_status: 502,
+				content_type: "text/plain",
+				body_bytes: new TextEncoder().encode(`Gateway body ${REFRESH}`).byteLength,
+				body_kind: "non_json",
+				body_keys: [],
+				body_keys_truncated: false,
+				schema_version: null,
+				ok: null,
+				error_code: null,
+			},
+			`Gateway body ${REFRESH}`,
+		],
+		[
+			"json array",
+			new globalThis.Response("[false,1]", { status: 502, headers: { "content-type": "application/json" } }),
+			{
+				http_status: 502,
+				content_type: "application/json",
+				body_bytes: new TextEncoder().encode("[false,1]").byteLength,
+				body_kind: "json_array",
+				body_keys: [],
+				body_keys_truncated: false,
+				schema_version: null,
+				ok: null,
+				error_code: null,
+			},
+			"[false,1]",
+		],
+		[
+			"json scalar",
+			new globalThis.Response(scalarBody, { status: 502, headers: { "content-type": "application/json" } }),
+			{
+				http_status: 502,
+				content_type: "application/json",
+				body_bytes: new TextEncoder().encode(scalarBody).byteLength,
+				body_kind: "json_scalar",
+				body_keys: [],
+				body_keys_truncated: false,
+				schema_version: null,
+				ok: null,
+				error_code: null,
+			},
+			scalarBody,
+		],
+	] as const) {
+		const client = createCealPersonalClientSessionClient({ endpoint: SESSION_ENDPOINT, fetchFn: async () => response });
+		let captured: CealPersonalClientSessionError | undefined;
+		await assert.rejects(
+			() => client.refresh(REFRESH, ATTEMPT),
+			(error) => {
+				if (!(error instanceof CealPersonalClientSessionError)) return false;
+				captured = error;
+				assert.equal(error.code, "invalid_response", label);
+				assert.deepEqual(error.response_shape, expected, label);
+				return true;
+			},
+		);
+		assert.ok(captured, label);
+		assert.equal(JSON.stringify(captured).includes(rawBody), false, `${label} must not retain the raw body`);
+		assert.doesNotMatch(JSON.stringify(captured), new RegExp(REFRESH, "u"), `${label} must not retain a bearer`);
+		assert.doesNotMatch(JSON.stringify(captured), new RegExp(ACCESS, "u"), `${label} must not retain an access token`);
+		assert.doesNotMatch(JSON.stringify(captured), new RegExp(ATTEMPT, "u"), `${label} must not retain an attempt reference`);
+	}
+});
+
+test("session client bounds response metadata and redacts credential-shaped fields", async () => {
+	const metadataBody = {
+		schema_version: "ceal.client_refresh_result.v2",
+		ok: false,
+		error_code: "internal_error",
+		"unsafe-key": "ignored",
+		...Object.fromEntries(Array.from({ length: 33 }, (_value, index) => [`field_${index}`, index])),
+	};
+	const client = createCealPersonalClientSessionClient({
+		endpoint: SESSION_ENDPOINT,
+		fetchFn: async () =>
+			new globalThis.Response(JSON.stringify(metadataBody), {
+				status: 500,
+				headers: { "content-type": "application/json" },
+			}),
+	});
+	await assert.rejects(
+		() => client.refresh(REFRESH, ATTEMPT),
+		(error) => {
+			assert.ok(error instanceof CealPersonalClientSessionError);
+			assert.equal(error.response_shape?.body_kind, "json_object");
+			assert.equal(error.response_shape?.body_keys_truncated, true);
+			assert.equal(error.response_shape?.body_keys.length, 31);
+			assert.deepEqual(error.response_shape?.body_keys.slice(0, 3), ["schema_version", "ok", "error_code"]);
+			assert.equal(error.response_shape?.body_keys.includes("unsafe-key"), false);
+			assert.equal(error.response_shape?.schema_version, "ceal.client_refresh_result.v2");
+			assert.equal(error.response_shape?.ok, false);
+			assert.equal(error.response_shape?.error_code, "internal_error");
+			return true;
+		},
+	);
+
+	const secretMetadataClient = createCealPersonalClientSessionClient({
+		endpoint: SESSION_ENDPOINT,
+		fetchFn: async () =>
+			new globalThis.Response(
+				JSON.stringify({
+					schema_version: `prefix:${REFRESH}`,
+					ok: false,
+					error_code: `suffix:${ATTEMPT}`,
+					refresh_token: REFRESH,
+					refresh_attempt_ref: ATTEMPT,
+					[REFRESH]: "credential-shaped key",
+				}),
+				{ status: 500, headers: { "content-type": `application/json; x-ceal-ref=${REFRESH}` } },
+			),
+	});
+	await assert.rejects(
+		() => secretMetadataClient.refresh(REFRESH, ATTEMPT),
+		(error) => {
+			assert.ok(error instanceof CealPersonalClientSessionError);
+			assert.equal(error.response_shape?.content_type, null);
+			assert.equal(error.response_shape?.schema_version, null);
+			assert.equal(error.response_shape?.error_code, null);
+			assert.equal(error.response_shape?.body_keys.includes(REFRESH), false);
+			assert.doesNotMatch(JSON.stringify(error), new RegExp(REFRESH, "u"));
+			assert.doesNotMatch(JSON.stringify(error), new RegExp(ATTEMPT, "u"));
+			return true;
+		},
+	);
+});
+
+test("session client reports refused response reads with a complete null-byte shape", async () => {
+	const oversized = oversizedStreamFetch();
+	const client = createCealPersonalClientSessionClient({ endpoint: SESSION_ENDPOINT, fetchFn: oversized.fetchFn });
+	await assert.rejects(
+		() => client.refresh(REFRESH),
+		(error) => {
+			assert.ok(error instanceof CealPersonalClientSessionError);
+			assert.deepEqual(error.response_shape, {
+				http_status: 200,
+				content_type: "application/json",
+				body_bytes: null,
+				body_kind: "too_large",
+				body_keys: [],
+				body_keys_truncated: false,
+				schema_version: null,
+				ok: null,
+				error_code: null,
+			});
+			return true;
+		},
+	);
+	assert.equal(oversized.wasCancelled(), true);
+});
+
+test("session client normalizes an unbounded content type to null", async () => {
+	const body = JSON.stringify({ ok: false, error_code: "internal_error" });
+	const client = createCealPersonalClientSessionClient({
+		endpoint: SESSION_ENDPOINT,
+		fetchFn: async () =>
+			new globalThis.Response(body, {
+				status: 500,
+				headers: { "content-type": "x".repeat(129) },
+			}),
+	});
+	await assert.rejects(
+		() => client.refresh(REFRESH),
+		(error) => {
+			assert.ok(error instanceof CealPersonalClientSessionError);
+			assert.equal(error.response_shape?.content_type, null);
+			assert.equal(error.response_shape?.body_kind, "non_json");
+			return true;
+		},
+	);
 });
 
 test("an undeclared oversized session body is refused mid-stream and cancelled", async () => {
@@ -234,7 +467,7 @@ test("an undeclared oversized session body is refused mid-stream and cancelled",
 	const client = createCealPersonalClientSessionClient({ endpoint: SESSION_ENDPOINT, fetchFn: oversized.fetchFn });
 	await assert.rejects(
 		() => client.refresh(REFRESH),
-		(error) => error instanceof CealPersonalClientSessionError && error.code === "invalid_response",
+		(error) => error instanceof CealPersonalClientSessionError && error.code === "invalid_response" && error.response_shape?.body_kind === "too_large",
 	);
 	assert.equal(oversized.wasCancelled(), true, "the oversized body must be cancelled, not drained");
 });

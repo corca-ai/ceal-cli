@@ -1,5 +1,10 @@
 import { CEAL_SESSION_CLIENT_TIMEOUT_MS, resolveRequestBounds } from "./request-bounds.js";
-import { decodeSessionProtocolResponse, exchangeSessionJson, resolveSessionEndpoint } from "./session-http-client.js";
+import {
+	type CealSessionResponseShape,
+	decodeSessionProtocolResponse,
+	exchangeSessionJson,
+	resolveSessionEndpoint,
+} from "./session-http-client.js";
 import { CEAL_CLIENT_VERSION } from "./version.js";
 import {
 	CEAL_CLIENT_REFRESH_ATTEMPT_REF,
@@ -25,12 +30,16 @@ export interface CreateCealPersonalClientSessionClientOptions {
 	timeoutMs?: number;
 }
 
+export type CealPersonalClientSessionResponseShape = CealSessionResponseShape;
+
 export class CealPersonalClientSessionError extends Error {
 	override readonly name = "CealPersonalClientSessionError";
 	readonly code: "invalid_configuration" | "request_timeout" | "request_failed" | "invalid_response";
-	constructor(code: CealPersonalClientSessionError["code"]) {
+	readonly response_shape: CealPersonalClientSessionResponseShape | undefined;
+	constructor(code: CealPersonalClientSessionError["code"], responseShape?: CealPersonalClientSessionResponseShape) {
 		super(`Ceal personal-client session ${code.replaceAll("_", " ")}.`);
 		this.code = code;
+		this.response_shape = responseShape;
 	}
 }
 
@@ -112,12 +121,12 @@ async function requestSession<T extends { readonly ok: boolean }>(input: {
 		fetchFn: input.fetchFn,
 		timeoutMs: input.timeoutMs,
 		body: input.body,
-		createError: (failure) => new CealPersonalClientSessionError(failure),
+		createError: (failure, responseShape) => new CealPersonalClientSessionError(failure, responseShape),
 		isClientError: (error) => error instanceof CealPersonalClientSessionError,
 	});
-	return decodeSessionProtocolResponse(response, input.decode, () => fail("invalid_response"));
+	return decodeSessionProtocolResponse(response, input.decode, (responseShape) => fail("invalid_response", responseShape));
 }
 
-function fail(code: "invalid_configuration" | "invalid_response"): never {
-	throw new CealPersonalClientSessionError(code);
+function fail(code: "invalid_configuration" | "invalid_response", responseShape?: CealPersonalClientSessionResponseShape): never {
+	throw new CealPersonalClientSessionError(code, responseShape);
 }
