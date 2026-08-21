@@ -2,7 +2,7 @@
 	"$schema": "https://unpkg.com/knip@6/schema.json",
 	"workspaces": {
 		".": {
-			"entry": ["scripts/*.ts", "scripts/test-support/*.ts", "test/**/*.test.ts"],
+			"entry": ["scripts/*.ts", "test/**/*.test.ts"],
 			"project": ["scripts/**/*.ts", "test/**/*.ts"]
 		},
 		"packages/ceal-client": {
@@ -10,7 +10,7 @@
 			"project": ["src/**/*.ts"]
 		},
 		"packages/ceal-worker-cli": {
-			"entry": ["src/index.ts", "src/bin.ts", "src/acceptance-receipt.ts", "test/**/*.test.mjs"],
+			"entry": ["src/index.ts", "src/bin.ts", "src/acceptance-receipt.ts"],
 			"project": ["src/**/*.ts"]
 		}
 	},

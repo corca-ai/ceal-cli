@@ -7,7 +7,7 @@ import { validSessionIdentityDiscriminator } from "./session-identity.js";
 import { closeSync, constants, existsSync, fchmodSync, lstatSync, openSync, readFileSync, writeSync } from "node:fs";
 import path from "node:path";
 
-// Client-local receipt spool: the masterplan Workbench's first usage data
+// Client-local receipt spool: the local observer's first usage data
 // source ("what did this client's token do"). It records an allowlisted
 // metadata projection of each receipt-bearing `ceal call` outcome — never
 // call arguments, purpose text, provider payloads, or token material — so

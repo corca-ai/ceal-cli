@@ -126,7 +126,7 @@ evidence is read only on demand so agents do not infer completion from an exit
 code alone.
 
 `ceal observe` serves the loopback-only (`127.0.0.1`, Host-header guarded)
-read-only Workbench page and JSON endpoint over the client's cached local
+read-only Observer page and JSON endpoint over the client's cached local
 state. The page's first navigation keeps the masterplan's two views
 deliberately separate — **My agent work** (the agent-runtime activity below)
 and **Ceal** (session, capability cache, install, guide, receipts) — plus a
@@ -142,7 +142,7 @@ retention-bounded record of each receipt-bearing `ceal call` outcome as an
 allowlisted metadata projection (request/audit references, capability, target,
 status, evidence, safe error kind) — never call arguments, purpose text,
 provider payloads, or token material. It is advisory client evidence for the
-local Workbench view; the Gateway audit ledger stays authoritative through
+local observer view; the Gateway audit ledger stays authoritative through
 `ceal receipt show`, and a spool failure never changes call behavior.
 
 The observer also renders a read-only agent-runtime audit view (`ceal-audit`):

@@ -1,6 +1,4 @@
 {
 	"schema_version": "ceal.no_legacy_mjs.v1",
-	"files": [
-		"scripts/test-support/base64url.mjs"
-	]
+	"files": []
 }

@@ -367,18 +367,16 @@ the Git index, and the working tree:
 - **shipped** — the protocol subtree inside the locked handoff archive that
   `gateway-protocol-handoff-lock.json` binds a release to consume.
 
-The frozen package suite is part of `test:contract`. One owner test imports
-`scripts/test-support/base64url.mjs`, which sits outside the pinned package
-subtree in the Gateway repository. This repository copies that test-only helper
-at the same path; `protocol-vendor-pin.json` records its owner blob and the
-release-tier `test/protocol-vendor-pin.test.ts` hashes the local file against it.
-The helper is not production or release input, but leaving it unbound would
-make the exact frozen suite silently depend on a second freehand implementation.
+The frozen package suite is part of `test:contract`. Its shared test support,
+including the non-canonical base64url fixture helper, lives inside the pinned
+`packages/ceal-protocol/test/protocol-test-support.ts` tree. There is no
+out-of-subtree compatibility helper or second blob identity for the release
+pin to carry.
 
 The contract-tier `test/contract/protocol-vendor-pin.test.ts` uses synthetic
 lock and quarantine inputs for validator/error-branch coverage. The release-tier
 `test/protocol-vendor-pin.test.ts` owns the four assertions that read the real
-checkout, Git tree/index, pin, lock, or helper blob. That placement keeps live
+checkout, Git tree/index, pin, or lock. That placement keeps live
 repository binding out of `check:unit` while retaining it in `test:release` and
 the full `test:tiers` path.
 

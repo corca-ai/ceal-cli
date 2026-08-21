@@ -173,6 +173,7 @@ function commandHelpOptions(name: CealCommandDefinition["name"]): readonly strin
 			"  --profile <profile-ref> Select one Profile for this request without re-login.",
 			"  --fresh                 Bypass the client discovery cache and probe the Gateway live.",
 			"  --detail                Include each capability's full input_contract (default: concise).",
+			"  --capability <id>       Show only this capability and the targets granting it.",
 			"  --endpoint <https-url>  Gateway client endpoint.",
 			"  --request-id <safe-id>  Correlation prefix for handshake and discovery.",
 			"  --token-stdin           Read the Gateway-issued client token from stdin.",

@@ -1567,6 +1567,13 @@
 			"class": "intentional",
 			"reviewed_at": "2026-08-18",
 			"note": "Fifth re-key of the same whole-file pair (f7c1d7bcf80fe9c3, b0f4fcbcd202f0ef, a70ee3fec1da8cbe and the third recorded above): repo-gates.test.ts against legacy-mjs-conversion.test.ts. Re-keyed a second time this session because repo-gates grew the fresh-eye repairs -- the lookup/gate environment binding and the git ls-files suite population. Ownership is unchanged and the shared material is still ordinary Node test scaffolding. The DEBT is now loud enough to name as the next move rather than a someday: this file re-keys on EVERY growth, it is past 2200 lines, and splitting the gate-contract and suite-ownership block into its own contract-lane file is what stops the re-key treadmill."
+		},
+		{
+			"surface": "code",
+			"id": "8d83c55b54bf90b8",
+			"class": "intentional",
+			"reviewed_at": "2026-08-21",
+			"note": "The two one-line run/refusal assertions at test/worker-release-installer.test.ts:451 and :487 exercise different mutation families: signed manifest binding overrides versus an already-installed generation widened or damaged. Their surrounding fixtures and failure messages are intentionally local proof of those distinct fail-closed boundaries. A shared assertion helper would erase which mutation is being re-run and add no semantic owner; keep the exact fingerprint visible so a future broader test refactor reopens it."
 		}
 	],
 	"fixable_ceiling": 0,

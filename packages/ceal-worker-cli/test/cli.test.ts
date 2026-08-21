@@ -972,10 +972,25 @@ test("a rejected capabilities option names the option and its own route's help",
 	assert.doesNotMatch(bogus.error.message, /target selection/u);
 
 	// The reporter's second case: a flag that is real, but on the subcommand.
-	const misplaced = await yamlRun(["capabilities", "--capability", "message.search"], 2);
-	assert.match(misplaced.error.message, /Unknown option '--capability' for 'ceal capabilities'/u);
+	//
+	// This case used to name `--capability`, and `2323849` (corca-ai/ceal-cli#7)
+	// made that spelling wrong without updating it: `--capability` is now a
+	// declared option of the BARE catalog route too, so it is accepted, the run
+	// proceeds, and the failure that arrives is `client_session_unavailable` at
+	// exit 3 rather than an unknown option at exit 2. The case is about a
+	// subcommand-only flag, so it now names one that still is: `--match` is in
+	// CAPABILITIES_TARGETS_VALUE_OPTIONS and deliberately not in
+	// CAPABILITIES_CATALOG_VALUE_OPTIONS (index.ts:712-714).
+	const misplaced = await yamlRun(["capabilities", "--match", "inbox"], 2);
+	assert.match(misplaced.error.message, /Unknown option '--match' for 'ceal capabilities'/u);
 	assert.equal(misplaced.error.next_action, "Run 'ceal capabilities --help'.");
 	assert.doesNotMatch(misplaced.error.message, /target selection/u);
+
+	// And the flag that #7 DID add is accepted by the bare route rather than
+	// reported as unknown — the contract that made the case above stale, pinned
+	// here so the two cannot drift apart silently again.
+	const declared = await yamlRun(["capabilities", "--capability", "message.search"], 3);
+	assert.notEqual(declared.error.kind, "invalid_argument");
 
 	// The same option on the route that declares it is not an unknown-option
 	// failure, and only that route may still speak of a target selection.
@@ -2747,6 +2762,60 @@ test("compatibility result data passes through without a client-side write proje
 	});
 });
 
+// #9: one opaque client-side rejection for six different faults trained callers
+// to retry blind variants of the whole command. Each rejection must name what it
+// rejected and point at the surface that answers it. These never reach a
+// Gateway, so no session or server fixture is needed.
+async function callRejection(args: readonly string[]) {
+	const payload = await yamlRun(["call", ...args], 2, {});
+	assert.equal(payload.error.kind, "invalid_argument", "#9 requires the error kind to stay stable");
+	return payload.error;
+}
+
+test("call names the unknown option rather than blaming the call arguments", async () => {
+	const error = await callRejection(["message.search", "--target", "target:team-inbox", "--json", "query=x"]);
+	assert.match(error.message, /Unknown option '--json'/u);
+	assert.doesNotMatch(error.message, /key=value/u);
+});
+
+test("call distinguishes an absent --target from a malformed one, and points at the capability's targets", async () => {
+	const absent = await callRejection(["message.search", "query=x", "limit=1"]);
+	assert.match(absent.message, /needs '--target <target-ref>'/u);
+	// The pointer is narrowed to the capability in hand, which is only possible
+	// because `capabilities --capability` now exists.
+	assert.match(absent.next_action, /ceal capabilities --capability message\.search/u);
+
+	const malformed = await callRejection(["message.search", "--target", "not a target ref", "query=x"]);
+	assert.match(malformed.message, /Invalid target ref 'not a target ref'/u);
+	assert.notEqual(absent.message, malformed.message, "these two faults need different corrections");
+});
+
+// The core of #9: a rejected argument is a contract question, not a syntax
+// question, so it points at input-contract discovery.
+test("call names the rejected key=value operand and points at the capability's input contract", async () => {
+	const error = await callRejection(["message.search", "--target", "target:team-inbox", "NotAKey=x"]);
+	assert.match(error.message, /Invalid call argument 'NotAKey=x'/u);
+	assert.match(error.message, /lower_snake_case/u);
+	assert.match(error.next_action, /ceal capabilities --detail --capability message\.search/u);
+});
+
+test("call names a duplicated call argument key", async () => {
+	const error = await callRejection(["message.search", "--target", "target:team-inbox", "query=a", "query=b"]);
+	assert.match(error.message, /Call argument 'query' is supplied more than once/u);
+});
+
+test("call bounds and sanitizes the token it echoes back into a refusal", async () => {
+	const long = await callRejection(["message.search", "--target", "target:team-inbox", `${"x".repeat(400)}=v`]);
+	assert.match(long.message, /…/u, "an unbounded echo would print the whole operand");
+	assert.ok(long.message.length < 200, `refusal stayed bounded: ${long.message.length}`);
+
+	// A bell character inside the key both fails the grammar and must not survive
+	// into stdout.
+	const control = await callRejection(["message.search", "--target", "target:team-inbox", "bad\u0007key=v"]);
+	assert.match(control.message, /Invalid call argument .badkey=v./u);
+	assert.doesNotMatch(control.message, /[\u0000-\u001f\u007f]/u);
+});
+
 test("call does not impose a legacy capability-specific operand allowlist", async () => {
 	const payload = await yamlRun(
 		[
@@ -3253,6 +3322,87 @@ test("a safe Gateway action survives when the message is missing", () => {
 		nextAction: "Use the Gateway-issued confirmation reference.",
 		denial: false,
 	});
+});
+
+// corca-ai/ceal-cli#14 item 4. The generic fallback pair is right for a code
+// whose remedy is server-side, and wrong for the two the CLIENT can act on: a
+// target-catalog refusal is not fixed by checking Gateway status and retrying,
+// it is fixed by picking a different target. These four tests pin which codes
+// get local text, that the text names a real discovery route, and that the
+// Gateway still outranks it.
+test("a target-catalog refusal with no Gateway text names the route that lists valid targets", () => {
+	assert.deepEqual(classifyGatewayFailure({ code: "target_catalog_selection_invalid" }, "message.create"), {
+		code: "target_catalog_selection_invalid",
+		message: "The Gateway refused the call because the named target is not a valid selection for this capability.",
+		nextAction: "Run 'ceal capabilities targets --capability message.create' to select a bounded target, then call again with one it lists.",
+		denial: false,
+	});
+});
+
+test("an ungranted-capability refusal with no Gateway text names the route that shows grants", () => {
+	assert.deepEqual(classifyGatewayFailure({ code: "target_catalog_capability_not_granted" }, "message.create"), {
+		code: "target_catalog_capability_not_granted",
+		message: "The Gateway refused the call because this capability is not granted for the named target.",
+		nextAction:
+			"Run 'ceal capabilities --capability message.create' to see which targets grant this capability, then call a granted target or request a grant for this one.",
+		denial: true,
+	});
+});
+
+test("local catalog text never outranks the Gateway's own, and never leaks an unsafe capability id", () => {
+	// Gateway text present: the local pair must not appear at all.
+	assert.deepEqual(classifyGatewayFailure({ code: "target_catalog_selection_invalid", message: "server-controlled", next_action: "server-controlled action" }, "message.create"), {
+		code: "target_catalog_selection_invalid",
+		message: "server-controlled",
+		nextAction: "server-controlled action",
+		denial: false,
+	});
+	// An id that fails the public-safe gate degrades to the placeholder rather
+	// than being echoed into rendered output.
+	const unsafeCapability = `ceal_refresh_${"r".repeat(43)}`;
+	assert.equal(
+		classifyGatewayFailure({ code: "target_catalog_selection_invalid" }, unsafeCapability).nextAction,
+		"Run 'ceal capabilities targets --capability <capability-id>' to select a bounded target, then call again with one it lists.",
+	);
+	// No id at all still emits a completable command, not a truncated one.
+	assert.equal(
+		classifyGatewayFailure({ code: "target_catalog_capability_not_granted" }).nextAction,
+		"Run 'ceal capabilities --capability <capability-id>' to see which targets grant this capability, then call a granted target or request a grant for this one.",
+	);
+});
+
+test("only the two target-catalog codes acquire local text; every other refusal stays generic", () => {
+	for (const code of ["resource_not_available", "connector_unavailable", "rate_limited", "invalid_arguments", "authentication_failed", "duplicate_write_refused"]) {
+		const failure = classifyGatewayFailure({ code }, "message.create");
+		assert.equal(failure.message, "The Gateway rejected the capability request.", code);
+		assert.equal(failure.nextAction, "Check Gateway status and audit readback before deciding whether to retry.", code);
+	}
+});
+
+test("the call renderer threads its own capability id into the target-catalog action", () => {
+	let stdout = "";
+	const status = writeCallGatewayFailure(
+		{ error: { code: "target_catalog_selection_invalid" } },
+		{
+			stdout: {
+				write: (chunk) => {
+					stdout += String(chunk);
+				},
+			},
+		},
+		storedSession("http://127.0.0.1:1/gateway/client"),
+		{ ok: true, capabilityId: "message.create", targetRef: "target:not-in-catalog", arguments: {}, purpose: "Create" },
+		"request:catalog-selection",
+	);
+	assert.equal(status, 3);
+	const payload = parseYaml(stdout);
+	assert.equal(payload.status, "error");
+	assert.equal(payload.error.kind, "target_catalog_selection_invalid");
+	// The wiring is the point: an id known only to the caller reached the text.
+	assert.equal(
+		payload.error.next_action,
+		"Run 'ceal capabilities targets --capability message.create' to select a bounded target, then call again with one it lists.",
+	);
 });
 
 test("a direct Gateway failure renderer never reflects unsafe code, text, or proof refs", () => {
@@ -4222,6 +4372,136 @@ test("capabilities --detail restores each capability's full input contract", asy
 		// The concise-mode recovery hint is not repeated when the detail is present.
 		assert.equal(Object.hasOwn(payload, "capability_detail"), false);
 	});
+});
+
+// `--capability` on the bare catalog route (#7). Two capabilities on two
+// different targets, so narrowing has something to remove on both axes.
+function twoCapabilityDiscovery(request: FixtureRequest): FixtureResponse {
+	const capability = (id: string, label: string) => ({
+		capability_id: id,
+		label,
+		effect: "read",
+		target_requirement: "required",
+		input_contract: { schema_version: `ceal.${id.replace(".", "_")}_input.v1`, required: ["query"], query: { type: "string", max_bytes: 512 } },
+		evidence_requirement: "gateway_audit",
+	});
+	const target = (ref: string, label: string, capabilityId: string) => ({
+		target_ref: ref,
+		label,
+		connector_kind: "slack",
+		target_kind: "conversation",
+		access: "granted",
+		capability_ids: [capabilityId],
+		capability_access: [
+			{ schema_version: "ceal.capability_access.v1", capability_id: capabilityId, grant_ref: `grant:${ref}`, grant_revision: 4, readiness: "ready" },
+		],
+	});
+	return success(request, {
+		schema_version: "ceal.gateway_discovery.v2",
+		profile_ref: request.profile_ref,
+		membership_ref: "membership:narnia",
+		capabilities: [capability("message.search", "Search messages"), capability("file.search", "Search files")],
+		targets: [target("target:team-inbox", "Team inbox", "message.search"), target("target:workspace", "Workspace", "file.search")],
+		target_catalog: { target_count: 2, returned_count: 2, complete: true },
+		host_decision: "accepted",
+		proof_level: "host_decision",
+		non_claims: ["provider_execution_not_reached", "production_audit_not_reached"],
+	});
+}
+
+function twoCapabilityGateway(request: FixtureRequest): FixtureResponse {
+	return request.operation === "handshake" ? handshakeResponse(request) : twoCapabilityDiscovery(request);
+}
+
+const CATALOG_FILTER_ARGS = ["--profile", "profile:narnia", "--request-id", "narnia:filter:001", "--token-stdin"] as const;
+const CATALOG_FILTER_SECRET = { readSecret: async () => `ceal_personal_${"F".repeat(43)}` };
+
+test("capabilities --capability narrows both the capability rows and the targets that grant it", async () => {
+	await withGateway(async ({ endpoint }) => {
+		const payload = await yamlRun(
+			["capabilities", "--capability", "message.search", "--endpoint", endpoint, ...CATALOG_FILTER_ARGS],
+			0,
+			CATALOG_FILTER_SECRET,
+		);
+		assert.equal(payload.status, "available");
+		assert.deepEqual(
+			payload.capabilities.map((item: { capability_id: string }) => item.capability_id),
+			["message.search"],
+		);
+		// The target granting only the filtered-out capability goes with it.
+		assert.deepEqual(
+			payload.targets.map((item: { target_ref: string }) => item.target_ref),
+			["target:team-inbox"],
+		);
+		// A narrowed payload has to say it is narrowed, or a piped copy of it
+		// misreports what the session may do.
+		assert.equal(payload.capability_filter, "message.search");
+	}, twoCapabilityGateway);
+});
+
+test("capabilities --capability refuses an id the catalog does not contain instead of rendering an empty page", async () => {
+	await withGateway(async ({ endpoint }) => {
+		const payload = await yamlRun(
+			["capabilities", "--capability", "message.nope", "--endpoint", endpoint, ...CATALOG_FILTER_ARGS],
+			2,
+			CATALOG_FILTER_SECRET,
+		);
+		assert.equal(payload.ok, false);
+		assert.equal(payload.error.kind, "selector_not_supported");
+		// Naming the id is the whole point: a zero-row page reads as "no access".
+		assert.match(payload.error.message, /message\.nope/u);
+		assert.match(payload.error.next_action, /without --capability/u);
+	}, twoCapabilityGateway);
+});
+
+test("capabilities --capability rejects a malformed id by naming the route, not by probing the Gateway", async () => {
+	await withGateway(async ({ endpoint, requests }) => {
+		const payload = await yamlRun(
+			["capabilities", "--capability", "NOT A CAPABILITY", "--endpoint", endpoint, ...CATALOG_FILTER_ARGS],
+			2,
+			CATALOG_FILTER_SECRET,
+		);
+		assert.equal(payload.error.kind, "invalid_argument");
+		// This assertion was green against a stale `dist/` for the wrong reason:
+		// an *undeclared* `--capability` also refuses with `invalid_argument`.
+		// Pin the distinction so the option must genuinely be declared.
+		assert.doesNotMatch(payload.error.message, /Unknown option/u);
+		assert.equal(requests.length, 0, "a malformed id must be refused before any Gateway request");
+	}, twoCapabilityGateway);
+});
+
+// The filter is applied to the rendered payload and never to the request,
+// because the discovery cache key carries no filter. If a filtered discovery
+// were ever cached under that key, every later unfiltered call would be served
+// a truncated catalog and would silently under-report the session's access.
+test("capabilities --capability does not poison the discovery cache for later unfiltered calls", async () => {
+	await withGateway(async ({ endpoint }) => {
+		let cached: CealDiscoveryCacheEntry | null = null;
+		const cacheRuntime = {
+			...CATALOG_FILTER_SECRET,
+			loadDiscoveryCache: async () => cached,
+			saveDiscoveryCache: async (value: CealDiscoveryCacheEntry) => {
+				cached = value;
+			},
+		};
+
+		const filtered = await yamlRun(
+			["capabilities", "--capability", "message.search", "--endpoint", endpoint, ...CATALOG_FILTER_ARGS],
+			0,
+			cacheRuntime,
+		);
+		assert.deepEqual(
+			filtered.capabilities.map((item: { capability_id: string }) => item.capability_id),
+			["message.search"],
+		);
+
+		const unfiltered = await yamlRun(["capabilities", "--endpoint", endpoint, ...CATALOG_FILTER_ARGS], 0, cacheRuntime);
+		assert.deepEqual(
+			unfiltered.capabilities.map((item: { capability_id: string }) => item.capability_id).sort(),
+			["file.search", "message.search"],
+		);
+		assert.equal(Object.hasOwn(unfiltered, "capability_filter"), false);
+	}, twoCapabilityGateway);
 });
 
 test("capabilities negotiates and surfaces the eligible-Profile catalog for --profile selection", async () => {

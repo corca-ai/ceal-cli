@@ -83,7 +83,7 @@ export interface CealCommandRuntime {
 	// event summaries (ceal-audit; transcript text never surfaces). See
 	// agent-audit.ts.
 	inspectAgentAudit?: () => CealAgentAuditState;
-	// On-demand bounded event scan for one inventoried session (Workbench
+	// On-demand bounded event scan for one inventoried session (local observer
 	// drill-down); null declares a rejected runtime/ref grammar.
 	inspectAgentSession?: (runtime: string, sessionRef: string) => CealAgentSessionEventsLookup | null;
 	runStableUpdate?: (options?: CealStableUpdateOptions) => Promise<CealStableUpdateResult>;

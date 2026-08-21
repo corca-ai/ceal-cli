@@ -139,18 +139,6 @@ test("a module no entry reaches is reported as a file rather than export by expo
 	assert.deepEqual(report.findings, []);
 });
 
-test("the protocol pin exempts only its exact owner-bound test-support file", (context) => {
-	const root = fixture(context, {
-		"package.json": MANIFEST,
-		"protocol-vendor-pin.json": JSON.stringify({ test_support: { vendored_path: "scripts/test-support/base64url.mjs" } }),
-		"scripts/entry.ts": "export function nothing() {}\nnothing();\n",
-		"scripts/test-support/base64url.mjs": "export function fixtureOnly() {}\n",
-		"scripts/test-support/stranded.ts": "export function stillStranded() {}\n",
-	});
-	const report = analyzeProductionReachability({ repoRoot: root, workflows: [] });
-	assert.deepEqual(report.unreachableFiles, ["scripts/test-support/stranded.ts"]);
-});
-
 test("a @testOnly export is exempt, and the tag on one declaration does not cover the next", (context) => {
 	const root = fixture(context, {
 		"package.json": MANIFEST,

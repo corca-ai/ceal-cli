@@ -587,7 +587,15 @@ async function runCapabilities(options: readonly string[], io: CealCliIo, runtim
 	if (!named || named.operands.length > 0) return writeCapabilitiesArgumentError(options, policy, io);
 	const wantsFresh = policy.acceptsFresh && named.flags.has("--fresh");
 	const wantsDetail = named.flags.has("--detail");
-	const effectiveOptions = routeOptions.filter((option) => option !== "--detail" && !(wantsFresh && option === "--fresh"));
+	// `--capability` narrows the catalog client-side, so it is stripped like the
+	// two flags above -- but it carries a value, and leaving either token behind
+	// would reach `parseGatewayOptions`, which does not declare it. The targets
+	// route sends its own `--capability` in the request body, so it is untouched.
+	const catalogCapability = policy.selectsTarget ? undefined : named.values.get("--capability");
+	if (catalogCapability !== undefined && !validCapabilityId(catalogCapability)) {
+		return writeCapabilitiesArgumentError(options, policy, io);
+	}
+	const effectiveOptions = withoutClientSideCapabilitiesOptions(routeOptions, wantsFresh, catalogCapability !== undefined);
 	const selection = policy.parse(effectiveOptions);
 	if (selection === null) return writeCapabilitiesArgumentError(options, policy, io);
 	const renewalContext = createCapabilityRenewalContext();
@@ -606,7 +614,17 @@ async function runCapabilities(options: readonly string[], io: CealCliIo, runtim
 		// gate while the expensive discovery probe is served from the client cache
 		// when warm. The targets case is a live paged query and is never cached.
 		if (selection.kind === "catalog") {
-			return await serveCapabilityCatalog(resolved.value, handshake, client, selection, wantsFresh, wantsDetail, io, runtime);
+			return await serveCapabilityCatalog(
+				resolved.value,
+				handshake,
+				client,
+				selection,
+				wantsFresh,
+				wantsDetail,
+				catalogCapability,
+				io,
+				runtime,
+			);
 		}
 		const discovery = await withCealTiming(runtime.timing, "gateway_discovery", () =>
 			client.request({
@@ -618,13 +636,15 @@ async function runCapabilities(options: readonly string[], io: CealCliIo, runtim
 		);
 		if (!discovery.ok) return writeCapabilitiesGatewayFailure(discovery, resolved.value, route, io, "discovery");
 		const selectorRefusal = unsupportedTargetSelector(discovery.value.capabilities, selection);
-		if (selectorRefusal)
+		if (selectorRefusal) {
 			return writeError("selector_not_supported", selectorRefusal.message, io, selectorRefusal.nextAction, renewalContext.outcome);
+		}
 		return writeCapabilitiesAvailable(
 			handshake,
 			discovery,
 			selection,
 			wantsDetail,
+			catalogCapability,
 			io,
 			{ source: "live_discovery" },
 			runtime,
@@ -653,6 +673,11 @@ async function serveCapabilityCatalog(
 	selection: { kind: "catalog" },
 	wantsFresh: boolean,
 	wantsDetail: boolean,
+	// Narrowing is applied to the rendered payload, never to the request or the
+	// cache: the cache key below does not include a filter, so a filtered
+	// discovery written under it would serve a truncated catalog to every later
+	// unfiltered call.
+	capabilityFilter: string | undefined,
 	io: CealCliIo,
 	runtime: CealCommandContext,
 ): Promise<number> {
@@ -675,6 +700,7 @@ async function serveCapabilityCatalog(
 				{ request_id: `${access.requestId}:discover:cached`, value: entry.discovery as unknown as CealGatewayDiscoveryValue },
 				selection,
 				wantsDetail,
+				capabilityFilter,
 				io,
 				{ source: "cached_discovery", cachedAt: entry.cachedAt, expiresAt: entry.cachedAt + ttlMs },
 				runtime,
@@ -702,11 +728,34 @@ async function serveCapabilityCatalog(
 		discovery,
 		selection,
 		wantsDetail,
+		capabilityFilter,
 		io,
 		{ source: "live_discovery" },
 		runtime,
 		access.renewalContext,
 	);
+}
+
+// `--detail` and `--fresh` are value-less, but `--capability` is not, so its
+// argument has to be dropped with it. `parseNamedOptions` has already proved the
+// argv well-formed by this point, so a declared value option always has its
+// value in the next slot.
+function withoutClientSideCapabilitiesOptions(
+	routeOptions: readonly string[],
+	wantsFresh: boolean,
+	stripsCapability: boolean,
+): string[] {
+	const remaining: string[] = [];
+	for (let index = 0; index < routeOptions.length; index += 1) {
+		const option = routeOptions[index];
+		if (option === "--detail" || (wantsFresh && option === "--fresh")) continue;
+		if (stripsCapability && option === "--capability") {
+			index += 1;
+			continue;
+		}
+		remaining.push(option as string);
+	}
+	return remaining;
 }
 
 type ParsedTargetCatalogOptions =
@@ -717,7 +766,7 @@ type ParsedTargetCatalogOptions =
 // Every option each capabilities route declares, including the two this command
 // strips before the older parsers. Kept beside those parsers so a new option
 // cannot be accepted without also becoming nameable in a refusal.
-const CAPABILITIES_CATALOG_VALUE_OPTIONS = new Set(["--endpoint", "--profile", "--request-id"]);
+const CAPABILITIES_CATALOG_VALUE_OPTIONS = new Set(["--capability", "--endpoint", "--profile", "--request-id"]);
 const CAPABILITIES_CATALOG_FLAG_OPTIONS = new Set(["--token-stdin", "--fresh", "--detail"]);
 const CAPABILITIES_TARGETS_VALUE_OPTIONS = new Set(["--capability", "--cursor", "--limit", "--match", "--profile"]);
 const CAPABILITIES_TARGETS_FLAG_OPTIONS = new Set(["--detail"]);
@@ -1050,14 +1099,40 @@ function writeCapabilitiesAvailable(
 	discovery: { request_id: string; value: CealGatewayDiscoveryValue },
 	selection: Exclude<ParsedTargetCatalogOptions, null>,
 	detail: boolean,
+	capabilityFilter: string | undefined,
 	io: CealCliIo,
 	provenance: CatalogProvenance,
 	runtime: CealCommandContext,
 	renewalContext: CapabilityRenewalContext,
 ): number {
-	const capabilities = discovery.value.capabilities.map((capability) => renderedCapability(capability, detail));
+	// A filter matching nothing is a refusal, not an empty catalog. A mistyped id
+	// that renders a well-formed page with zero rows reads as "this session has
+	// no access", which is the wrong diagnosis and the expensive one to chase.
+	if (capabilityFilter !== undefined && !discovery.value.capabilities.some((capability) => capability.capability_id === capabilityFilter)) {
+		return writeError(
+			"selector_not_supported",
+			`This session's capability catalog does not contain '${capabilityFilter}'.`,
+			io,
+			"Run 'ceal capabilities' without --capability to list every capability this session may use.",
+			renewalContext.outcome,
+		);
+	}
+	const capabilities = discovery.value.capabilities
+		.filter((capability) => capabilityFilter === undefined || capability.capability_id === capabilityFilter)
+		.map((capability) => renderedCapability(capability, detail));
 	const targetPage = discovery.value.phase === "target_page" ? discovery.value : undefined;
-	const targets = targetPage ? renderCapabilityTargets(targetPage.targets, targetPage.capabilities) : [];
+	// The renderer gets the FULL capability list on purpose: it throws on a target
+	// naming a capability absent from that list, so narrowing its input would
+	// crash on any target that also grants a filtered-out capability. Narrow the
+	// rendered rows instead.
+	const targets = (
+		targetPage === undefined
+			? []
+			: renderCapabilityTargets(targetPage.targets, targetPage.capabilities)
+	).filter(
+		(target) =>
+			capabilityFilter === undefined || target.capability_access.some((access) => access.capability_id === capabilityFilter),
+	);
 	const targetSelection = targetSelectionProjection(selection);
 	const nextAction =
 		targetPage === undefined
@@ -1087,6 +1162,10 @@ function writeCapabilitiesAvailable(
 			...(handshake.value.eligible_profiles ? { eligible_profiles: handshake.value.eligible_profiles } : {}),
 		},
 		capabilities,
+		// A narrowed payload must say so. Without this an agent that pipes or
+		// caches the result cannot tell a one-capability session from a filtered
+		// view of a large one.
+		...(capabilityFilter ? { capability_filter: capabilityFilter } : {}),
 		targets,
 		discovery_phase: discovery.value.phase,
 		// Tell an agent the concise rows omit the input grammar and how to get it,
@@ -1288,13 +1367,7 @@ function capabilityIndexNextAction(profileRef: string): string {
 
 async function runCall(options: readonly string[], io: CealCliIo, runtime: CealCommandContext): Promise<number> {
 	const parsed = parseCallOptions(options);
-	if (!parsed.ok)
-		return writeError(
-			"invalid_argument",
-			"Invalid ceal call arguments.",
-			io,
-			"Run 'ceal call --help' and supply one capability, one target, and valid key=value arguments.",
-		);
+	if (!parsed.ok) return writeError("invalid_argument", parsed.message, io, parsed.nextAction);
 	const resolved = await resolveCallSession(runtime, "renew");
 	if (!resolved.ok) return writeCallUnavailable(resolved.reason, io, null, parsed);
 	const requestId = `${runtime.nextRequestId?.() ?? "ceal:call"}:call`;
@@ -1634,23 +1707,123 @@ async function requestCapabilityCall(
 	return { call, client, session };
 }
 
-type ParsedCallOptions = CealParsedCapabilityCall | { ok: false };
+// A single opaque `{ ok: false }` for six different faults taught callers to
+// retry blind variants of the whole command instead of correcting the one wrong
+// operand (#9). Each rejection now names what was rejected and points at the
+// surface that answers it: command grammar for a grammar fault, the capability
+// catalog for an unknown id or target, and the capability's own input contract
+// for a bad `key=value` -- which is the one an agent actually needs, because a
+// rejected argument is a contract question, not a syntax question.
+type CallOptionRejection = { ok: false; message: string; nextAction: string };
+
+type ParsedCallOptions = CealParsedCapabilityCall | CallOptionRejection;
+
+const CALL_VALUE_OPTIONS: ReadonlySet<string> = new Set(["--target", "--profile", "--approval-ref"]);
+const CALL_FLAG_OPTIONS: ReadonlySet<string> = new Set();
+const CALL_GRAMMAR_NEXT_ACTION = "Run 'ceal call --help' and supply one capability, one target, and valid key=value arguments.";
+const CALL_MAX_OPTIONS = 67;
+
+// @separateGrammar: the operand-key grammar. It coincides with
+// `client-session.ts`'s reason-code token and is not the same fact — one
+// bounds what an operator may type, the other what the Gateway may say.
+const CALL_OPERAND_KEY = /^[a-z][a-z0-9_]{0,63}$/u;
+
+function rejectCall(message: string, nextAction: string): CallOptionRejection {
+	return { ok: false, message, nextAction };
+}
+
+function callCatalogNextAction(capabilityId: string | undefined) {
+	return validCapabilityId(capabilityId)
+		? `Run 'ceal capabilities --capability ${capabilityId}' to list the targets that grant it.`
+		: "Run 'ceal capabilities' to list the capabilities this session may use.";
+}
+
+function callContractNextAction(capabilityId: string) {
+	return `Run 'ceal capabilities --detail --capability ${capabilityId}' to read this capability's input contract.`;
+}
+
+/**
+ * Echo the caller's own token back so a refusal can name it — but bound the
+ * length and drop control characters first. This reaches stdout, and an
+ * operator who pasted the wrong thing into a ref slot should not have it
+ * re-emitted verbatim across an unbounded line.
+ */
+function quotedCallToken(value: string | undefined): string {
+	if (value === undefined) return "(missing)";
+	const printable = [...value]
+		.filter((character) => {
+			const codePoint = character.codePointAt(0);
+			return codePoint !== undefined && codePoint > 0x1f && codePoint !== 0x7f;
+		})
+		.join("");
+	return `'${printable.length > 64 ? `${printable.slice(0, 64)}…` : printable}'`;
+}
+
+type ParsedCallOperands = { ok: true; values: Map<string, unknown> } | { ok: false; message: string };
+
+function parseCallOperands(operands: readonly string[]): ParsedCallOperands {
+	const values = new Map<string, unknown>();
+	for (const operand of operands) {
+		const separator = operand.indexOf("=");
+		const key = separator > 0 ? operand.slice(0, separator) : "";
+		if (!CALL_OPERAND_KEY.test(key))
+			return {
+				ok: false,
+				message: `Invalid call argument ${quotedCallToken(operand)}: expected 'key=value' with a lower_snake_case key.`,
+			};
+		if (values.has(key)) return { ok: false, message: `Call argument '${key}' is supplied more than once.` };
+		values.set(key, decodeCallOperandValue(operand.slice(separator + 1)));
+	}
+	return { ok: true, values };
+}
 
 function parseCallOptions(options: readonly string[]): ParsedCallOptions {
-	if (options.length < 3 || options.length > 67) return { ok: false };
+	if (options.length < 3) {
+		return rejectCall("A ceal call needs a capability id, '--target', and a target ref.", CALL_GRAMMAR_NEXT_ACTION);
+	}
+	if (options.length > CALL_MAX_OPTIONS) {
+		return rejectCall(
+			`A ceal call accepts at most ${CALL_MAX_OPTIONS} arguments; this one has ${options.length}.`,
+			CALL_GRAMMAR_NEXT_ACTION,
+		);
+	}
 	const capabilityId = options[0];
-	if (!validCapabilityId(capabilityId)) return { ok: false };
-	const parsed = parseNamedOptions(options.slice(1), new Set(["--target", "--profile", "--approval-ref"]), new Set());
-	if (!parsed) return { ok: false };
+	if (!validCapabilityId(capabilityId)) {
+		return rejectCall(`Invalid capability id ${quotedCallToken(capabilityId)}.`, callCatalogNextAction(undefined));
+	}
+	const rest = options.slice(1);
+	const parsed = parseNamedOptions(rest, CALL_VALUE_OPTIONS, CALL_FLAG_OPTIONS);
+	if (!parsed) {
+		const unknown = unknownNamedOption(rest, CALL_VALUE_OPTIONS, CALL_FLAG_OPTIONS);
+		return rejectCall(
+			unknown === null
+				? "A named option is repeated or missing its value in this ceal call."
+				: `Unknown option ${quotedCallToken(unknown)} for 'ceal call'.`,
+			CALL_GRAMMAR_NEXT_ACTION,
+		);
+	}
 	const targetRef = parsed.values.get("--target");
-	if (!validTargetRef(targetRef)) return { ok: false };
+	// Absent and malformed were one indistinguishable refusal; they need
+	// different corrections, so they are two.
+	if (targetRef === undefined) {
+		return rejectCall("A ceal call needs '--target <target-ref>'.", callCatalogNextAction(capabilityId));
+	}
+	if (!validTargetRef(targetRef)) {
+		return rejectCall(`Invalid target ref ${quotedCallToken(targetRef)}.`, callCatalogNextAction(capabilityId));
+	}
 	const profileRef = parsed.values.get("--profile");
-	if (profileRef !== undefined && !isSafeProfileRef(profileRef)) return { ok: false };
+	if (profileRef !== undefined && !isSafeProfileRef(profileRef)) {
+		return rejectCall(`Invalid '--profile' value ${quotedCallToken(profileRef)}.`, CALL_GRAMMAR_NEXT_ACTION);
+	}
 	const approvalRef = parsed.values.get("--approval-ref");
-	if (approvalRef !== undefined && !CEAL_SAFE_SLACK_JOIN_APPROVAL_REF.test(approvalRef)) return { ok: false };
-	const operands = parseKeyValueOperands(parsed.operands);
-	if (!operands) return { ok: false };
-	const arguments_ = Object.fromEntries(operands);
+	if (approvalRef !== undefined && !CEAL_SAFE_SLACK_JOIN_APPROVAL_REF.test(approvalRef)) {
+		return rejectCall(`Invalid '--approval-ref' value ${quotedCallToken(approvalRef)}.`, CALL_GRAMMAR_NEXT_ACTION);
+	}
+	const operands = parseCallOperands(parsed.operands);
+	if (!operands.ok) {
+		return rejectCall(operands.message, callContractNextAction(capabilityId));
+	}
+	const arguments_ = Object.fromEntries(operands.values);
 	return {
 		ok: true,
 		capabilityId,
@@ -1711,20 +1884,6 @@ function extractProfileOption(options: readonly string[]): { value?: string; rem
 
 function isSafeProfileRef(value: string | undefined): value is string {
 	return typeof value === "string" && CEAL_SAFE_PROFILE_REF.test(value);
-}
-
-function parseKeyValueOperands(operands: readonly string[]): Map<string, unknown> | null {
-	const parsed = new Map<string, unknown>();
-	for (const operand of operands) {
-		const separator = operand.indexOf("=");
-		const key = separator > 0 ? operand.slice(0, separator) : "";
-		// @separateGrammar: the operand-key grammar. It coincides with
-		// `client-session.ts`'s reason-code token and is not the same fact — one
-		// bounds what an operator may type, the other what the Gateway may say.
-		if (!/^[a-z][a-z0-9_]{0,63}$/u.test(key) || parsed.has(key)) return null;
-		parsed.set(key, decodeCallOperandValue(operand.slice(separator + 1)));
-	}
-	return parsed;
 }
 
 /**
