@@ -2648,6 +2648,60 @@ test("compatibility result data passes through without a client-side write proje
 	});
 });
 
+// #9: one opaque client-side rejection for six different faults trained callers
+// to retry blind variants of the whole command. Each rejection must name what it
+// rejected and point at the surface that answers it. These never reach a
+// Gateway, so no session or server fixture is needed.
+async function callRejection(args: readonly string[]) {
+	const payload = await yamlRun(["call", ...args], 2, {});
+	assert.equal(payload.error.kind, "invalid_argument", "#9 requires the error kind to stay stable");
+	return payload.error;
+}
+
+test("call names the unknown option rather than blaming the call arguments", async () => {
+	const error = await callRejection(["message.search", "--target", "target:team-inbox", "--json", "query=x"]);
+	assert.match(error.message, /Unknown option '--json'/u);
+	assert.doesNotMatch(error.message, /key=value/u);
+});
+
+test("call distinguishes an absent --target from a malformed one, and points at the capability's targets", async () => {
+	const absent = await callRejection(["message.search", "query=x", "limit=1"]);
+	assert.match(absent.message, /needs '--target <target-ref>'/u);
+	// The pointer is narrowed to the capability in hand, which is only possible
+	// because `capabilities --capability` now exists.
+	assert.match(absent.next_action, /ceal capabilities --capability message\.search/u);
+
+	const malformed = await callRejection(["message.search", "--target", "not a target ref", "query=x"]);
+	assert.match(malformed.message, /Invalid target ref 'not a target ref'/u);
+	assert.notEqual(absent.message, malformed.message, "these two faults need different corrections");
+});
+
+// The core of #9: a rejected argument is a contract question, not a syntax
+// question, so it points at input-contract discovery.
+test("call names the rejected key=value operand and points at the capability's input contract", async () => {
+	const error = await callRejection(["message.search", "--target", "target:team-inbox", "NotAKey=x"]);
+	assert.match(error.message, /Invalid call argument 'NotAKey=x'/u);
+	assert.match(error.message, /lower_snake_case/u);
+	assert.match(error.next_action, /ceal capabilities --detail --capability message\.search/u);
+});
+
+test("call names a duplicated call argument key", async () => {
+	const error = await callRejection(["message.search", "--target", "target:team-inbox", "query=a", "query=b"]);
+	assert.match(error.message, /Call argument 'query' is supplied more than once/u);
+});
+
+test("call bounds and sanitizes the token it echoes back into a refusal", async () => {
+	const long = await callRejection(["message.search", "--target", "target:team-inbox", `${"x".repeat(400)}=v`]);
+	assert.match(long.message, /…/u, "an unbounded echo would print the whole operand");
+	assert.ok(long.message.length < 200, `refusal stayed bounded: ${long.message.length}`);
+
+	// A bell character inside the key both fails the grammar and must not survive
+	// into stdout.
+	const control = await callRejection(["message.search", "--target", "target:team-inbox", "bad\u0007key=v"]);
+	assert.match(control.message, /Invalid call argument .badkey=v./u);
+	assert.doesNotMatch(control.message, /[\u0000-\u001f\u007f]/u);
+});
+
 test("call does not impose a legacy capability-specific operand allowlist", async () => {
 	const payload = await yamlRun(
 		[

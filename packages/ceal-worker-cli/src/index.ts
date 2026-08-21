@@ -1277,13 +1277,7 @@ function capabilityCatalogNextAction(
 
 async function runCall(options: readonly string[], io: CealCliIo, runtime: CealCommandContext): Promise<number> {
 	const parsed = parseCallOptions(options);
-	if (!parsed.ok)
-		return writeError(
-			"invalid_argument",
-			"Invalid ceal call arguments.",
-			io,
-			"Run 'ceal call --help' and supply one capability, one target, and valid key=value arguments.",
-		);
+	if (!parsed.ok) return writeError("invalid_argument", parsed.message, io, parsed.nextAction);
 	const resolved = await resolveCallSession(runtime, "renew");
 	if (!resolved.ok) return writeCallUnavailable(resolved.reason, io, null, parsed);
 	const requestId = `${runtime.nextRequestId?.() ?? "ceal:call"}:call`;
@@ -1620,20 +1614,119 @@ async function requestCapabilityCall(
 	return { call, client, session };
 }
 
-type ParsedCallOptions = CealParsedCapabilityCall | { ok: false };
+// A single opaque `{ ok: false }` for six different faults taught callers to
+// retry blind variants of the whole command instead of correcting the one wrong
+// operand (#9). Each rejection now names what was rejected and points at the
+// surface that answers it: command grammar for a grammar fault, the capability
+// catalog for an unknown id or target, and the capability's own input contract
+// for a bad `key=value` -- which is the one an agent actually needs, because a
+// rejected argument is a contract question, not a syntax question.
+type CallOptionRejection = { ok: false; message: string; nextAction: string };
+
+type ParsedCallOptions = CealParsedCapabilityCall | CallOptionRejection;
+
+const CALL_VALUE_OPTIONS: ReadonlySet<string> = new Set(["--target", "--profile"]);
+const CALL_FLAG_OPTIONS: ReadonlySet<string> = new Set();
+const CALL_GRAMMAR_NEXT_ACTION = "Run 'ceal call --help' and supply one capability, one target, and valid key=value arguments.";
+const CALL_MAX_OPTIONS = 67;
+
+// @separateGrammar: the operand-key grammar. It coincides with
+// `client-session.ts`'s reason-code token and is not the same fact — one
+// bounds what an operator may type, the other what the Gateway may say.
+const CALL_OPERAND_KEY = /^[a-z][a-z0-9_]{0,63}$/u;
+
+function rejectCall(message: string, nextAction: string): CallOptionRejection {
+	return { ok: false, message, nextAction };
+}
+
+function callCatalogNextAction(capabilityId: string | undefined) {
+	return validCapabilityId(capabilityId)
+		? `Run 'ceal capabilities --capability ${capabilityId}' to list the targets that grant it.`
+		: "Run 'ceal capabilities' to list the capabilities this session may use.";
+}
+
+function callContractNextAction(capabilityId: string) {
+	return `Run 'ceal capabilities --detail --capability ${capabilityId}' to read this capability's input contract.`;
+}
+
+/**
+ * Echo the caller's own token back so a refusal can name it — but bound the
+ * length and drop control characters first. This reaches stdout, and an
+ * operator who pasted the wrong thing into a ref slot should not have it
+ * re-emitted verbatim across an unbounded line.
+ */
+function quotedCallToken(value: string | undefined): string {
+	if (value === undefined) return "(missing)";
+	const printable = [...value]
+		.filter((character) => {
+			const codePoint = character.codePointAt(0);
+			return codePoint !== undefined && codePoint > 0x1f && codePoint !== 0x7f;
+		})
+		.join("");
+	return `'${printable.length > 64 ? `${printable.slice(0, 64)}…` : printable}'`;
+}
+
+/**
+ * Reads the same operands against the same rule as `parseKeyValueOperands`
+ * without changing that function's pass/fail contract, so the refusal can say
+ * which operand was wrong and how. Mirrors `unknownNamedOption`.
+ */
+function rejectedCallOperandMessage(operands: readonly string[]): string {
+	const seen = new Set<string>();
+	for (const operand of operands) {
+		const separator = operand.indexOf("=");
+		const key = separator > 0 ? operand.slice(0, separator) : "";
+		if (!CALL_OPERAND_KEY.test(key)) {
+			return `Invalid call argument ${quotedCallToken(operand)}: expected 'key=value' with a lower_snake_case key.`;
+		}
+		if (seen.has(key)) return `Call argument '${key}' is supplied more than once.`;
+		seen.add(key);
+	}
+	return "A call argument is not a valid 'key=value' pair.";
+}
 
 function parseCallOptions(options: readonly string[]): ParsedCallOptions {
-	if (options.length < 3 || options.length > 67) return { ok: false };
+	if (options.length < 3) {
+		return rejectCall("A ceal call needs a capability id, '--target', and a target ref.", CALL_GRAMMAR_NEXT_ACTION);
+	}
+	if (options.length > CALL_MAX_OPTIONS) {
+		return rejectCall(
+			`A ceal call accepts at most ${CALL_MAX_OPTIONS} arguments; this one has ${options.length}.`,
+			CALL_GRAMMAR_NEXT_ACTION,
+		);
+	}
 	const capabilityId = options[0];
-	if (!validCapabilityId(capabilityId)) return { ok: false };
-	const parsed = parseNamedOptions(options.slice(1), new Set(["--target", "--profile"]), new Set());
-	if (!parsed) return { ok: false };
+	if (!validCapabilityId(capabilityId)) {
+		return rejectCall(`Invalid capability id ${quotedCallToken(capabilityId)}.`, callCatalogNextAction(undefined));
+	}
+	const rest = options.slice(1);
+	const parsed = parseNamedOptions(rest, CALL_VALUE_OPTIONS, CALL_FLAG_OPTIONS);
+	if (!parsed) {
+		const unknown = unknownNamedOption(rest, CALL_VALUE_OPTIONS, CALL_FLAG_OPTIONS);
+		return rejectCall(
+			unknown === null
+				? "A named option is repeated or missing its value in this ceal call."
+				: `Unknown option ${quotedCallToken(unknown)} for 'ceal call'.`,
+			CALL_GRAMMAR_NEXT_ACTION,
+		);
+	}
 	const targetRef = parsed.values.get("--target");
-	if (!validTargetRef(targetRef)) return { ok: false };
+	// Absent and malformed were one indistinguishable refusal; they need
+	// different corrections, so they are two.
+	if (targetRef === undefined) {
+		return rejectCall("A ceal call needs '--target <target-ref>'.", callCatalogNextAction(capabilityId));
+	}
+	if (!validTargetRef(targetRef)) {
+		return rejectCall(`Invalid target ref ${quotedCallToken(targetRef)}.`, callCatalogNextAction(capabilityId));
+	}
 	const profileRef = parsed.values.get("--profile");
-	if (profileRef !== undefined && !isSafeProfileRef(profileRef)) return { ok: false };
+	if (profileRef !== undefined && !isSafeProfileRef(profileRef)) {
+		return rejectCall(`Invalid '--profile' value ${quotedCallToken(profileRef)}.`, CALL_GRAMMAR_NEXT_ACTION);
+	}
 	const operands = parseKeyValueOperands(parsed.operands);
-	if (!operands) return { ok: false };
+	if (!operands) {
+		return rejectCall(rejectedCallOperandMessage(parsed.operands), callContractNextAction(capabilityId));
+	}
 	const arguments_ = Object.fromEntries(operands);
 	return {
 		ok: true,
@@ -1701,10 +1794,7 @@ function parseKeyValueOperands(operands: readonly string[]): Map<string, string>
 	for (const operand of operands) {
 		const separator = operand.indexOf("=");
 		const key = separator > 0 ? operand.slice(0, separator) : "";
-		// @separateGrammar: the operand-key grammar. It coincides with
-		// `client-session.ts`'s reason-code token and is not the same fact — one
-		// bounds what an operator may type, the other what the Gateway may say.
-		if (!/^[a-z][a-z0-9_]{0,63}$/u.test(key) || parsed.has(key)) return null;
+		if (!CALL_OPERAND_KEY.test(key) || parsed.has(key)) return null;
 		parsed.set(key, operand.slice(separator + 1));
 	}
 	return parsed;
