@@ -1713,8 +1713,8 @@ function isSafeProfileRef(value: string | undefined): value is string {
 	return typeof value === "string" && CEAL_SAFE_PROFILE_REF.test(value);
 }
 
-function parseKeyValueOperands(operands: readonly string[]): Map<string, string> | null {
-	const parsed = new Map<string, string>();
+function parseKeyValueOperands(operands: readonly string[]): Map<string, unknown> | null {
+	const parsed = new Map<string, unknown>();
 	for (const operand of operands) {
 		const separator = operand.indexOf("=");
 		const key = separator > 0 ? operand.slice(0, separator) : "";
@@ -1722,9 +1722,31 @@ function parseKeyValueOperands(operands: readonly string[]): Map<string, string>
 		// `client-session.ts`'s reason-code token and is not the same fact — one
 		// bounds what an operator may type, the other what the Gateway may say.
 		if (!/^[a-z][a-z0-9_]{0,63}$/u.test(key) || parsed.has(key)) return null;
-		parsed.set(key, operand.slice(separator + 1));
+		parsed.set(key, decodeCallOperandValue(operand.slice(separator + 1)));
 	}
 	return parsed;
+}
+
+/**
+ * Contract fields include arrays (github.issue.create labels) and integers.
+ * A JSON literal in the value position is decoded; every other operand stays a
+ * string so ordinary text cannot be rewritten by a coincidental JSON parse.
+ */
+function decodeCallOperandValue(raw: string): unknown {
+	if (raw === "true" || raw === "false" || raw === "null") return JSON.parse(raw);
+	if (/^-?(?:0|[1-9]\d*)(?:\.\d+)?$/u.test(raw)) {
+		const parsed = Number(raw);
+		if (Number.isFinite(parsed)) return parsed;
+	}
+	if (raw.startsWith("[") || raw.startsWith("{")) {
+		try {
+			const parsed: unknown = JSON.parse(raw);
+			if (parsed !== null && typeof parsed === "object") return parsed;
+		} catch {
+			return raw;
+		}
+	}
+	return raw;
 }
 
 function writeCapabilitiesUnavailable(io: CealCliIo, sessionRefresh: CealSessionRefreshOutcome = "none"): number {

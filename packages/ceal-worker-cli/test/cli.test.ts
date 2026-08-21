@@ -3756,6 +3756,52 @@ test("call preserves one request identity across authentication refresh and fina
 	);
 });
 
+test("call JSON-decodes array operands so github.issue.create labels stay an array", async () => {
+	await withGateway(
+		async ({ endpoint, requests }) => {
+			const payload = await yamlRun(
+				[
+					"call",
+					"github.issue.create",
+					"--target",
+					"target:github-repository:aaaaaaaaaaaaaaaaaaaaaaaa",
+					"title=HOTL prove-owned issue",
+					"body=Do not close this issue.",
+					"labels=[]",
+					"idempotency_key=hotl-issue-1",
+				],
+				0,
+				{
+					readStoredSession: async () => storedSession(endpoint),
+					nextRequestId: () => "narnia:issue-create:1",
+				},
+			);
+			assert.equal(payload.status, "completed");
+			assert.deepEqual(requiredValue(requests[0], "issue_create_call").body.body.arguments, {
+				title: "HOTL prove-owned issue",
+				body: "Do not close this issue.",
+				labels: [],
+				idempotency_key: "hotl-issue-1",
+			});
+		},
+		(request) =>
+			request.operation === "call"
+				? success(request, {
+						schema_version: "ceal.gateway_call_result.v1",
+						capability_id: "github.issue.create",
+						grant_ref: "grant:github-issue-create",
+						grant_revision: 1,
+						target_ref: request.body.target_ref,
+						data: { schema_version: "ceal.github_issue_create_result.v1", delivery: "verified" },
+						redaction: { state: "applied", omitted_classes: ["issue_title", "issue_body", "issue_labels", "idempotency_key"] },
+						host_decision: "accepted",
+						proof_level: "host_decision",
+						non_claims: ["production_audit_not_reached"],
+					})
+				: readbackResponse(request),
+	);
+});
+
 test("call forwards a discovered provider-neutral capability without a CLI command rewrite", async () => {
 	await withGateway(
 		async ({ endpoint, requests }) => {

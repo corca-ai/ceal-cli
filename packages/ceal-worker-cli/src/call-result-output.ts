@@ -80,7 +80,7 @@ export interface CealParsedCapabilityCall {
 	ok: true;
 	capabilityId: string;
 	targetRef: string;
-	arguments: Record<string, string | number>;
+	arguments: Record<string, unknown>;
 	purpose: string;
 	profileRef?: string;
 	approvalRef?: string;
