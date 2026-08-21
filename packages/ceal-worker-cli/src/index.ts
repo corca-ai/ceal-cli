@@ -1666,23 +1666,22 @@ function quotedCallToken(value: string | undefined): string {
 	return `'${printable.length > 64 ? `${printable.slice(0, 64)}…` : printable}'`;
 }
 
-/**
- * Reads the same operands against the same rule as `parseKeyValueOperands`
- * without changing that function's pass/fail contract, so the refusal can say
- * which operand was wrong and how. Mirrors `unknownNamedOption`.
- */
-function rejectedCallOperandMessage(operands: readonly string[]): string {
-	const seen = new Set<string>();
+type ParsedCallOperands = { ok: true; values: Map<string, string> } | { ok: false; message: string };
+
+function parseCallOperands(operands: readonly string[]): ParsedCallOperands {
+	const values = new Map<string, string>();
 	for (const operand of operands) {
 		const separator = operand.indexOf("=");
 		const key = separator > 0 ? operand.slice(0, separator) : "";
-		if (!CALL_OPERAND_KEY.test(key)) {
-			return `Invalid call argument ${quotedCallToken(operand)}: expected 'key=value' with a lower_snake_case key.`;
-		}
-		if (seen.has(key)) return `Call argument '${key}' is supplied more than once.`;
-		seen.add(key);
+		if (!CALL_OPERAND_KEY.test(key))
+			return {
+				ok: false,
+				message: `Invalid call argument ${quotedCallToken(operand)}: expected 'key=value' with a lower_snake_case key.`,
+			};
+		if (values.has(key)) return { ok: false, message: `Call argument '${key}' is supplied more than once.` };
+		values.set(key, operand.slice(separator + 1));
 	}
-	return "A call argument is not a valid 'key=value' pair.";
+	return { ok: true, values };
 }
 
 function parseCallOptions(options: readonly string[]): ParsedCallOptions {
@@ -1723,11 +1722,11 @@ function parseCallOptions(options: readonly string[]): ParsedCallOptions {
 	if (profileRef !== undefined && !isSafeProfileRef(profileRef)) {
 		return rejectCall(`Invalid '--profile' value ${quotedCallToken(profileRef)}.`, CALL_GRAMMAR_NEXT_ACTION);
 	}
-	const operands = parseKeyValueOperands(parsed.operands);
-	if (!operands) {
-		return rejectCall(rejectedCallOperandMessage(parsed.operands), callContractNextAction(capabilityId));
+	const operands = parseCallOperands(parsed.operands);
+	if (!operands.ok) {
+		return rejectCall(operands.message, callContractNextAction(capabilityId));
 	}
-	const arguments_ = Object.fromEntries(operands);
+	const arguments_ = Object.fromEntries(operands.values);
 	return {
 		ok: true,
 		capabilityId,
@@ -1787,17 +1786,6 @@ function extractProfileOption(options: readonly string[]): { value?: string; rem
 
 function isSafeProfileRef(value: string | undefined): value is string {
 	return typeof value === "string" && CEAL_SAFE_PROFILE_REF.test(value);
-}
-
-function parseKeyValueOperands(operands: readonly string[]): Map<string, string> | null {
-	const parsed = new Map<string, string>();
-	for (const operand of operands) {
-		const separator = operand.indexOf("=");
-		const key = separator > 0 ? operand.slice(0, separator) : "";
-		if (!CALL_OPERAND_KEY.test(key) || parsed.has(key)) return null;
-		parsed.set(key, operand.slice(separator + 1));
-	}
-	return parsed;
 }
 
 function writeCapabilitiesUnavailable(io: CealCliIo): number {

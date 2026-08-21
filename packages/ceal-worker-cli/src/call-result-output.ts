@@ -91,6 +91,35 @@ function emitCallResult(io: ResultIo, envelope: Record<string, unknown>, record:
 	return exitCode;
 }
 
+function emitCallFailure(
+	io: ResultIo,
+	fields: {
+		status: "blocked" | "error";
+		capability?: string;
+		target?: string;
+		session: CealStoredSession | null;
+		profileRef?: string;
+		receipt?: Record<string, unknown>;
+		error: Record<string, unknown>;
+	},
+	record: CealCallResultRecorder | undefined,
+): void {
+	emitCallResult(
+		io,
+		{
+			schema_version: "ceal.result.v2",
+			ok: false,
+			status: fields.status,
+			...(fields.capability === undefined ? {} : { capability: fields.capability }),
+			...(fields.target === undefined ? {} : { target: fields.target }),
+			...gatewayResultIdentity(fields.session, fields.profileRef),
+			...(fields.receipt === undefined ? {} : { receipt: fields.receipt }),
+			error: fields.error,
+		},
+		record,
+	);
+}
+
 /**
  * The issuing Gateway identity for one result, in the same `gateway:` shape the
  * discovery surfaces already emit. A result that omits it cannot be attributed
@@ -182,16 +211,15 @@ export function writeCallGatewayFailure(
 	const failure = classifyGatewayFailure(response.error, parsed.capabilityId);
 	const denial = failure.denial || isSafeGatewayPolicyDenial(response, parsed, requestId);
 	const proofRefs = isSafeGatewayProofRef(response.proof_ref_or_unavailable) ? [response.proof_ref_or_unavailable] : [];
-	emitCallResult(
+	emitCallFailure(
 		io,
 		{
-			schema_version: "ceal.result.v2",
-			ok: false,
 			status: denial ? "blocked" : "error",
 			capability: parsed.capabilityId,
 			target: parsed.targetRef,
-			...gatewayResultIdentity(session, parsed.profileRef),
 			receipt: callReceipt("not_read_back", "not_read_back", requestId, proofRefs),
+			session,
+			...(parsed.profileRef === undefined ? {} : { profileRef: parsed.profileRef }),
 			error: {
 				kind: denial ? "authorization_denied" : failure.code,
 				message: failure.message,
@@ -246,23 +274,23 @@ export function writeCallUnavailable(
 	const requestWasIssued = typeof requestId === "string";
 	const sessionFailure = isClassifiedClientSessionFailure(reason) ? classifyClientSessionFailure(reason) : null;
 	const sessionUnavailable = reason === "session_unavailable";
-	emitCallResult(
+	emitCallFailure(
 		io,
 		{
-			schema_version: "ceal.result.v2",
-			ok: false,
 			status: "error",
-			...(parsed ? { capability: parsed.capabilityId, target: parsed.targetRef } : {}),
-			...gatewayResultIdentity(session, parsed?.profileRef),
+			...(parsed
+				? {
+						capability: parsed.capabilityId,
+						target: parsed.targetRef,
+						...(parsed.profileRef === undefined ? {} : { profileRef: parsed.profileRef }),
+					}
+				: {}),
+			session,
 			// A transport failure after the worker has allocated the Gateway request
 			// reference has an unknown outcome: the Gateway may have completed and
 			// audited the call after the client stopped waiting. Preserve that safe
 			// correlation key so an agent can inspect it instead of repeating a write.
-			...(requestWasIssued
-				? {
-						receipt: callReceipt("outcome_unknown", "not_read_back", requestId, []),
-					}
-				: {}),
+			...(requestWasIssued ? { receipt: callReceipt("outcome_unknown", "not_read_back", requestId, []) } : {}),
 			error: {
 				kind: reason,
 				...(sessionFailure
