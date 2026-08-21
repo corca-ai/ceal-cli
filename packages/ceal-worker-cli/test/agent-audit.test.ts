@@ -256,6 +256,77 @@ test("agent audit reports inactive, stale, and unknown honestly", () => {
 	});
 });
 
+test("irregular entries in the Claude tree are skipped without truncating the inventory", () => {
+	withHome((home) => {
+		// The DISCRIMINATING cases for the two type tests in `collectClaudeSessions`.
+		// The symlinked session in the inventory test above cannot serve: `lstatSync`
+		// does not follow, so a symlink fails `isFile()` and `isDirectory()` too,
+		// and it passed with either operand. These two are neither symlinks nor the
+		// expected type, so only the type test can refuse them.
+		const projects = path.join(home, ".claude", "projects");
+		const project = path.join(projects, "-home-user-codes-repo");
+		mkdirSync(project, { recursive: true });
+		writeSession(project, "11111111-2222-3333-4444-555555555555.jsonl", NOW - 60_000, '{"type":"mode"}\n');
+
+		// A DIRECTORY named like a transcript. Counted as a session if `!isFile()`
+		// stops refusing it.
+		mkdirSync(path.join(project, "dddddddd-1111-2222-3333-444444444444.jsonl"));
+		// A regular FILE where a project directory belongs. If `!isDirectory()`
+		// stops refusing it, the walk tries to read it as a directory, fails, and
+		// declares the whole inventory partial.
+		writeFileSync(path.join(projects, "-not-a-project"), "");
+
+		const claude = adapterFor(inspectAgentAudit(home, {}, NOW), "claude");
+		assert.equal(claude.sessionCount, 1, "a directory named like a transcript is not a session");
+		assert.notEqual(claude.inventory, "partial", "a regular file among the projects must not truncate the walk");
+	});
+});
+
+test("irregular entries in the Codex tree are skipped without truncating the inventory", () => {
+	withHome((home) => {
+		// The Claude counterparts above, for `collectCodexSessions`. Same reasoning:
+		// the symlinked rollout in the inventory test cannot name these branches,
+		// because it fails both operands.
+		const july = path.join(home, ".codex", "sessions", "2026", "07", "24");
+		mkdirSync(july, { recursive: true });
+		writeSession(july, "rollout-2026-07-24T09-09-51-019f9174-fec1-78d2-b4be-91402cdc66d4.jsonl", NOW - 60_000, '{"a":1}\n');
+
+		// A DIRECTORY named like a rollout: counted as a session if `!isFile()`
+		// stops refusing it.
+		mkdirSync(path.join(july, "rollout-2026-07-24T11-00-00-019f9174-fec1-78d2-b4be-91402cdc66d6.jsonl"));
+		// A regular FILE where a day directory belongs: descended into if
+		// `!isDirectory()` stops refusing it, which truncates the walk.
+		writeFileSync(path.join(home, ".codex", "sessions", "2026", "07", "25"), "");
+
+		const codex = adapterFor(inspectAgentAudit(home, {}, NOW), "codex");
+		assert.equal(codex.sessionCount, 1, "a directory named like a rollout is not a session");
+		assert.notEqual(codex.inventory, "partial", "a regular file among the day directories must not truncate the walk");
+	});
+});
+
+test("a regular file where a transcript root belongs is refused as unreadable", () => {
+	withHome((home) => {
+		// A regular file standing in for a transcript root, which nothing covered.
+		//
+		// It does NOT discriminate the root `!root.isDirectory()` test, and that is
+		// measured: with the operand dropped, `readBoundedDirectoryNames` throws
+		// ENOTDIR on the file instead, `collectTranscriptSessions` catches it into
+		// the same `status: "unreadable"`, and this stays green. The type test is an
+		// early refusal in front of an identical outcome, so no input separates
+		// them. Asserted here is that the shape is refused, not which line refuses.
+		mkdirSync(path.join(home, ".claude"), { recursive: true });
+		mkdirSync(path.join(home, ".codex"), { recursive: true });
+		writeFileSync(path.join(home, ".claude", "projects"), "");
+		writeFileSync(path.join(home, ".codex", "sessions"), "");
+
+		const state = inspectAgentAudit(home, {}, NOW);
+		// An unreadable root proves nothing about activity, so it must not be
+		// reported as inactive.
+		assert.equal(adapterFor(state, "claude").health, "unknown");
+		assert.equal(adapterFor(state, "codex").health, "unknown");
+	});
+});
+
 test("agent audit marks a truncated walk as a partial inventory, never complete", () => {
 	withHome((home) => {
 		// One junk-stuffed project exhausts the walk budget before a later
