@@ -333,7 +333,7 @@ test("ceal observe serves redacted cached state on a guarded loopback page", asy
 	assert.match(contentType, /text\/html/u);
 	assert.match(contentSecurityPolicy, /default-src 'none'/u);
 	const html = await page.text();
-	assert.match(html, /Ceal Workbench/u);
+	assert.match(html, /Ceal Observer/u);
 	// A second registered host must be visible to a human supervisor, not only in
 	// the JSON projection.
 	assert.match(html, /Agent hosts/u);

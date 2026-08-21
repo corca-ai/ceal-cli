@@ -85,7 +85,7 @@ export async function buildObserverState(runtime: CealObserverRuntime): Promise<
 	};
 }
 
-// Masterplan contract for initial Workbench suggestions: local, deterministic,
+// Masterplan contract for initial observer suggestions: local, deterministic,
 // and linked to their observed evidence — never opaque model judgments about
 // the user. Every rule below reads only the projections this page already
 // renders, so each entry's evidence is independently inspectable above it.
@@ -600,7 +600,7 @@ function respondAgentSession(response: ServerResponse, runtime: CealObserverRunt
 	});
 }
 
-// Workbench shell: the masterplan's first navigation — "My agent work" and
+// Observer shell: the first navigation — "My agent work" and
 // "Ceal" stay deliberately separate views, and "Privacy & retention" makes the
 // local data boundary and (absent) forwarding state inspectable. One embedded
 // document over the one state endpoint; no router, no build step.
@@ -609,7 +609,7 @@ const OBSERVER_PAGE = `<!doctype html>
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Ceal Workbench</title>
+<title>Ceal Observer</title>
 <style>
   :root { color-scheme: light dark; }
   body { font: 14px/1.5 ui-monospace, SFMono-Regular, Menlo, monospace; margin: 2rem auto; max-width: 60rem; padding: 0 1rem; }
@@ -625,7 +625,7 @@ const OBSERVER_PAGE = `<!doctype html>
 </style>
 </head>
 <body>
-<h1>Ceal Workbench <span class="badge">cached/local-safe</span><span class="badge">read-only</span></h1>
+<h1>Ceal Observer <span class="badge">cached/local-safe</span><span class="badge">read-only</span></h1>
 <p class="muted">No admin surface, no provider credentials, no live refresh. Reload the page after running a live command to see newer cached state.</p>
 <nav id="nav"></nav>
 <div id="root">Loading local state…</div>

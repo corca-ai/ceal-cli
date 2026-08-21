@@ -4,8 +4,8 @@ import { closeSync, constants, type Dir, fstatSync, lstatSync, opendirSync, open
 import path from "node:path";
 
 // ceal-audit inside the worker: a read-only local view of supported agent
-// runtimes' native transcript roots, rendered by the observer Workbench
-// shell. The masterplan fixes the vocabulary consumed here — one normalized
+// runtimes' native transcript roots, rendered by the local observer shell.
+// The masterplan fixes the vocabulary consumed here — one normalized
 // contract shared by the Codex and Claude adapters, collector health
 // (active/stale/inactive/unknown), and evidence coverage
 // (ceal-mediated/hook-enhanced/transcript-observed/unsupported). The full
@@ -219,7 +219,7 @@ function collectTranscriptSessions(
 }
 
 /**
- * On-demand bounded event scan for one inventoried session, so the Workbench
+ * On-demand bounded event scan for one inventoried session, so the local observer
  * can drill into any listed session, not only the newest auto-scanned ones.
  * The caller-supplied ref is never joined into a path: the same inventory walk
  * runs again and only a walk-produced transcript path is opened, so a crafted
