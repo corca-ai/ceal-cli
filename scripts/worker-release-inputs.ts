@@ -858,7 +858,13 @@ function requireRegularAbsoluteFile(value: unknown, code: string): string {
 function requireRegularFile(filePath: string, code: string): string {
 	if (!existsSync(filePath)) fail(code, "Worker release input is missing.");
 	const stat = lstatSync(filePath);
-	if (!stat.isFile() || stat.isSymbolicLink()) fail(code, "Worker release input must be a regular non-symlink file.");
+	// `lstatSync` does not follow the link, so a symlink already fails the check
+	// below and a second `|| stat.isSymbolicLink()` operand could never evaluate
+	// true -- the same reasoning `verify-protocol-vendor-pin.ts` wrote down when it
+	// removed its own. Measured rather than argued: dropping the operand kept the
+	// suite green, while dropping the surviving one turned
+	// the sibling guard in `verify-gateway-protocol-consumer.ts` red.
+	if (!stat.isFile()) fail(code, "Worker release input must be a regular non-symlink file.");
 	return filePath;
 }
 
