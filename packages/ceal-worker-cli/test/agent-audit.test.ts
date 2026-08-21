@@ -306,14 +306,20 @@ test("irregular entries in the Codex tree are skipped without truncating the inv
 
 test("a regular file where a transcript root belongs is refused as unreadable", () => {
 	withHome((home) => {
-		// A regular file standing in for a transcript root, which nothing covered.
+		// A regular file standing in for a transcript root. The two collectors are
+		// ASYMMETRIC here, which is the whole reason this test asserts two different
+		// things, and it was found by reading rather than by the first measurement.
 		//
-		// It does NOT discriminate the root `!root.isDirectory()` test, and that is
-		// measured: with the operand dropped, `readBoundedDirectoryNames` throws
-		// ENOTDIR on the file instead, `collectTranscriptSessions` catches it into
-		// the same `status: "unreadable"`, and this stays green. The type test is an
-		// early refusal in front of an identical outcome, so no input separates
-		// them. Asserted here is that the shape is refused, not which line refuses.
+		// Codex: `codexDayDirectories` wraps its own walk in a try/catch, so with
+		// `!root.isDirectory()` dropped the ENOTDIR is swallowed and the walk comes
+		// back COLLECTED-but-partial instead of unreadable. The `inventory`
+		// assertion below is what sees that; `health` alone does not, because a
+		// partial walk that found nothing is also "unknown".
+		//
+		// Claude: `collectClaudeSessions` does not wrap, so the ENOTDIR escapes into
+		// `collectTranscriptSessions`'s catch and lands on the SAME
+		// `status: "unreadable"`. No input separates the operands there, so for the
+		// Claude root this asserts the shape is refused, not which line refuses it.
 		mkdirSync(path.join(home, ".claude"), { recursive: true });
 		mkdirSync(path.join(home, ".codex"), { recursive: true });
 		writeFileSync(path.join(home, ".claude", "projects"), "");
@@ -323,7 +329,14 @@ test("a regular file where a transcript root belongs is refused as unreadable", 
 		// An unreadable root proves nothing about activity, so it must not be
 		// reported as inactive.
 		assert.equal(adapterFor(state, "claude").health, "unknown");
-		assert.equal(adapterFor(state, "codex").health, "unknown");
+		const codex = adapterFor(state, "codex");
+		assert.equal(codex.health, "unknown");
+		// The two collectors are NOT symmetric here, and only this assertion sees
+		// it. `codexDayDirectories` wraps its own walk in a try/catch, so with the
+		// root type test dropped the ENOTDIR is swallowed into a partial COLLECTED
+		// walk instead of an unreadable one. Asserting health alone missed that,
+		// because a partial walk that found nothing is also "unknown".
+		assert.equal(codex.inventory, undefined, "an unreadable root is not a partial walk");
 	});
 });
 

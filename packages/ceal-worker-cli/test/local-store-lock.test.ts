@@ -302,6 +302,25 @@ test("an owner record that is a directory rather than a file is refused", async 
 	});
 });
 
+test("a regular file where the lock directory belongs is refused", async () => {
+	await withStore(async (directory) => {
+		const lockPath = options(directory).lockPath;
+		// A regular file where the lock directory belongs, which nothing covered.
+		// The mode is 0o700 on purpose: at anything wider the `(lock.mode & 0o077)`
+		// operand would be what refuses, and the type test would still have no test
+		// naming it.
+		//
+		// It does NOT discriminate `!lock.isDirectory()`, and that is measured: with
+		// the operand dropped, every path under a regular file raises ENOTDIR and
+		// the store fails closed to the same refusal. The type test is an early exit
+		// in front of an identical outcome. Asserted here is that the shape is
+		// refused, not which line refuses it.
+		writeFileSync(lockPath, "", { mode: 0o700 });
+		fs.chmodSync(lockPath, 0o700);
+		await assert.rejects(withLocalStoreLock(options(directory), async () => {}), TestUnsafe);
+	});
+});
+
 test("a holder whose lock was reclaimed does not delete its successor's", async () => {
 	await withStore(async (directory) => {
 		const lockPath = options(directory).lockPath;
