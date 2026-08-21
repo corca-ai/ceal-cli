@@ -274,19 +274,23 @@ test("an owner record that is a directory rather than a file is refused", async 
 	await withStore(async (directory) => {
 		const lockPath = options(directory).lockPath;
 		mkdirSync(lockPath, { mode: 0o700 });
-		// A directory-shaped owner record, which nothing covered before. The mode is
-		// 0o700 so the permission operand cannot be what refuses it, and the lock is
-		// aged past the initialization grace so this is the abandonment path rather
-		// than a holder mid-write.
+		// The DISCRIMINATING case for `!owner.isFile()`. A directory-shaped owner
+		// record is not a symlink, so the `|| owner.isSymbolicLink()` operand that
+		// used to sit here could not have refused it -- and under `lstatSync` that
+		// operand could never fire at all, because a symlink fails `isFile()` first.
 		//
-		// What this test does NOT do, stated because the comment above it nearly
-		// claimed otherwise: it does not DISCRIMINATE `!owner.isFile()`. Measured
-		// twice -- dropping that operand leaves this test green, because a
-		// directory-shaped record that `readLockOwner` cannot parse is refused again
-		// further down the reclaim path, with the same `onUnsafe`. So this asserts
-		// that the store refuses the shape, not which branch refuses it. Finding an
-		// input only `!owner.isFile()` can refuse is open work; every non-file
-		// record found so far is also caught downstream.
+		// Two details are load-bearing. The mode is 0o700 so the permission operand
+		// cannot fire and mask the one under test. And the lock is aged past the
+		// initialization grace: left fresh, an unreadable owner record is classified
+		// `initializing` and the acquire refuses as BUSY, which is a different
+		// branch.
+		//
+		// Measured, but only after a correction worth recording: this suite loads
+		// `../dist/local-store-lock.js`, so a mutation of `src` proves nothing until
+		// `npm run build` has run. Two earlier runs reported this test as
+		// non-discriminating; both were executing three-day-old `dist` and were
+		// void. With the build in the loop, dropping `!owner.isFile()` turns this
+		// red.
 		mkdirSync(path.join(lockPath, "owner.json"), { mode: 0o700 });
 		const old = new Date(Date.now() - 60_000);
 		utimesSync(lockPath, old, old);
