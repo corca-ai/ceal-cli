@@ -248,7 +248,7 @@ reporting it because entry-file exports are never reported. Neither fact makes
 gap this section first assumed — there are two mechanisms, and each alone would
 have hidden both guards slice 2 deleted:
 
-- the top-level `scripts/*.mjs` are `entry` files, and `knip` reports no export
+- the top-level `scripts/*.ts` are `entry` files, and `knip` reports no export
   in an entry file;
 - under `scripts/lib/` it does report one, until a test imports it — and those
   suites import `scripts/` directly, with no build step between the test consumer
@@ -256,11 +256,11 @@ have hidden both guards slice 2 deleted:
 
 Excluding tests from `entry` to force the question turns every test file into an
 "unused file", which trades one blind spot for a page of noise. Undeclaring the
-entries would report every `scripts/*.mjs` as an unused file instead.
+entries would report every `scripts/*.ts` as an unused file instead.
 
 **The check exists — `npm run lint:reachability`**, in both gates and in
 `test/contract/production-reachability.test.ts`. It walks the production graph
-only: entries are the `node scripts/*.mjs` invocations declared in the manifest,
+only: entries are the `node scripts/*.ts` invocations declared in the manifest,
 in the lanes, and in the hook; edges are static relative imports; and a release
 lane's inline `node --input-type=module` step counts as a caller. Tests are not
 in the graph, which is the whole mechanism — a guard only its own suite calls is
