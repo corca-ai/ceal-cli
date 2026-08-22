@@ -16,7 +16,10 @@ const testsTypecheckConfig = JSON.parse(readFileSync(testsTypecheckConfigPath, "
 function trackedSourceFiles() {
 	return execFileSync(
 		"git",
-		["ls-files", "-z", "--", "packages/ceal-protocol/src", "packages/ceal-client/src", "packages/ceal-worker-cli/src"],
+		// Only the authored packages. `packages/ceal-protocol` is deliberately absent:
+		// it is an installed signed artifact, and naming it here would make this gate
+		// demand that a re-added source tree be typechecked rather than refused.
+		["ls-files", "-z", "--", "packages/ceal-client/src", "packages/ceal-worker-cli/src"],
 		{
 			cwd: ROOT,
 			encoding: "buffer",
@@ -41,9 +44,12 @@ test("source typecheck covers every tracked package TypeScript source", () => {
 	assert.deepEqual(configuredFiles, trackedSourceFiles());
 });
 
-test("source typecheck resolves workspace packages to exact editable source entrypoints", () => {
+test("source typecheck resolves the one owned workspace package to its editable source entrypoint", () => {
 	assert.deepEqual(typecheckConfig.compilerOptions.paths, {
-		"@corca-ai/ceal-protocol": ["./packages/ceal-protocol/src/index.ts"],
+		// The Protocol is deliberately absent. It is an installed dependency now, not
+		// a workspace, so it resolves to the tarball dist declarations that
+		// skipLibCheck skips -- which is what keeps this project ratcheting authored
+		// source without ratcheting a package this repository does not own.
 		"@corca-ai/ceal": ["./packages/ceal-client/src/index.ts"],
 	});
 	assert.equal(typecheckConfig.compilerOptions.baseUrl, undefined);

@@ -1,3 +1,4 @@
+import "../../../test/require-source-lane.ts";
 import { required as requiredValue } from "../../../test/required.ts";
 import { CealDeviceAdoptionClientError, createCealDeviceAdoptionClient } from "../src/index.ts";
 import { close, json, listen, readBody, serverPort } from "./client-response-test-support.ts";

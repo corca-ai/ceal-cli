@@ -22,6 +22,9 @@ import test from "node:test";
 import { fileURLToPath } from "node:url";
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..", "..");
+// The Protocol is an installed dependency, not a workspace. Naming the path once
+// keeps every binding below pointed at the same artifact.
+const PROTOCOL_DIST = "node_modules/@corca-ai/ceal-protocol/dist";
 const PACKAGE = "packages/ceal-worker-cli/src";
 
 const fixture = (context: TestContext, files: Record<string, string>): string => scratchTree(context, "ceal-one-fact-", files);
@@ -192,17 +195,22 @@ test("every exemption is still live, and each names the boundary that forbids on
 
 // ------------------------------------------------- the second homes, bound
 
-// `packages/ceal-protocol` owns both grammars below and is frozen; it does not
-// re-export either from its public index, and the client SDK ships standalone so
-// it cannot import the worker. The second homes are therefore unavoidable, and
-// `AGENTS.md` `## One Fact, One Home` says what that obliges: a gate binding the
-// copies, not a note saying they should match. These are that gate.
+// `@corca-ai/ceal-protocol` owns both grammars below and is an INSTALLED signed
+// artifact -- corca-ai/ceal owns it and this repository cannot edit it at all. It
+// does not re-export either grammar from its public index, and the client SDK ships
+// standalone so it cannot import the worker. The second homes are therefore
+// unavoidable, and `AGENTS.md` `## One Fact, One Home` says what that obliges: a
+// gate binding the copies, not a note saying they should match. These are that gate.
+//
+// These read the INSTALLED package rather than a vendored source tree, which is
+// what the repository now consumes and therefore the only honest thing to bind
+// against. The tarball ships `dist` and `conformance` and no `src`.
 //
 // The assertions read three separate modules, so none of them can be vacuous the
 // way a fixture compared against its own producer was.
 
 test("the safe-ref grammar agrees across the Protocol, the worker and the client", async () => {
-	const protocol = await import(path.join(ROOT, "packages/ceal-protocol/dist/gateway-validation-primitives.js"));
+	const protocol = await import(path.join(ROOT, PROTOCOL_DIST, "gateway-validation-primitives.js"));
 	const worker = await import(path.join(ROOT, "packages/ceal-worker-cli/dist/safe-ref.js"));
 	const client = await import(path.join(ROOT, "packages/ceal-client/dist/index.js"));
 
@@ -222,7 +230,7 @@ test("the safe-ref grammar agrees across the Protocol, the worker and the client
 });
 
 test("the Worker direct proof-ref defense agrees with Protocol safe refs", async () => {
-	const protocol = await import(path.join(ROOT, "packages/ceal-protocol/dist/gateway-validation-primitives.js"));
+	const protocol = await import(path.join(ROOT, PROTOCOL_DIST, "gateway-validation-primitives.js"));
 	const worker = await import(path.join(ROOT, "packages/ceal-worker-cli/dist/safe-ref.js"));
 	const opaque = "audit:AbcDef123456789012345678";
 	assert.doesNotThrow(() => protocol.requireSafeRef(opaque));
@@ -240,15 +248,15 @@ test("the Worker direct retry ceiling is bound to the Protocol decoder", () => {
 		assert.ok(match?.groups?.expression, `${relative} declares ${name} — re-aim this binding if ownership moves`);
 		return match.groups.expression;
 	};
-	const protocol = limitExpression("packages/ceal-protocol/src/index.ts", "MAX_RECOVERY_RETRY_AFTER_MS");
+	const protocol = limitExpression(`${PROTOCOL_DIST}/index.js`, "MAX_RECOVERY_RETRY_AFTER_MS");
 	const worker = limitExpression("packages/ceal-worker-cli/src/call-result-output.ts", "MAX_GATEWAY_RETRY_AFTER_MS");
 	assert.equal(worker, protocol, "the direct renderer refuses waits the Protocol decoder would reject");
 });
 
 test("the refresh-token grammar agrees across the Protocol, the worker and the client", () => {
 	const declarations = [
-		"packages/ceal-protocol/src/personal-client-session.ts",
-		"packages/ceal-protocol/src/enrollment.ts",
+		`${PROTOCOL_DIST}/personal-client-session.js`,
+		`${PROTOCOL_DIST}/enrollment.js`,
 		"packages/ceal-worker-cli/src/profile-store.ts",
 		"packages/ceal-client/src/personal-client-session-client.ts",
 	];

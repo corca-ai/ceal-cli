@@ -89,6 +89,32 @@ test("handoff verifier refuses changed bytes, source identity, vector semantics,
 	assert.throws(() => verifyGatewayLeasedConsumerCallHandoff({ repoRoot: third.root }), handoffError("invalid_handoff_lock"));
 });
 
+test("handoff verifier refuses a directory standing where the lock or artifact belongs", async (t) => {
+	// A directory where the lock and the artifact belong, which nothing covered
+	// before: the symlink test below cannot reach this shape, because `lstatSync`
+	// does not follow and a symlink fails `isFile()` too -- which is exactly why
+	// the `|| initial.isSymbolicLink()` operand that used to sit there could never
+	// decide anything.
+	//
+	// What this does NOT do: it does not DISCRIMINATE `!initial.isFile()`.
+	// Measured -- dropping that operand leaves this green, because the
+	// `O_NOFOLLOW` open of a directory SUCCEEDS on Linux and the `fstatSync(...)
+	// .isFile()` check on the very next line refuses it with the identical error
+	// code. So the lstat test is defence in depth over the fstat one, and the
+	// fstat one is what actually refuses. This asserts the shape is refused, not
+	// which of the two refuses it.
+	const artifactDirectory = await handoffFixture(t);
+	await rm(artifactDirectory.handoffPath);
+	await mkdir(artifactDirectory.handoffPath, { recursive: true });
+	assert.throws(() => verifyGatewayLeasedConsumerCallHandoff({ repoRoot: artifactDirectory.root }), handoffError("handoff_unavailable"));
+
+	const lockDirectory = await handoffFixture(t);
+	const lockDirectoryPath = path.join(lockDirectory.root, LOCK_PATH);
+	await rm(lockDirectoryPath);
+	await mkdir(lockDirectoryPath, { recursive: true });
+	assert.throws(() => verifyGatewayLeasedConsumerCallHandoff({ repoRoot: lockDirectory.root }), handoffError("handoff_lock_unavailable"));
+});
+
 test("handoff verifier refuses symlinked lock and artifact inputs", async (t) => {
 	const artifactLink = await handoffFixture(t);
 	await rm(artifactLink.handoffPath);

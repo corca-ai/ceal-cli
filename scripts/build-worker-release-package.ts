@@ -308,7 +308,10 @@ function readJsonFile(file: string): unknown {
 }
 
 function stagePackedPackage(tarball: string, dependencyRoot: string, packageName: string): void {
-	if (typeof tarball !== "string" || !existsSync(tarball) || !lstatSync(tarball).isFile() || lstatSync(tarball).isSymbolicLink()) {
+	// `lstatSync` does not follow, so a symlink already fails `isFile()`; the
+	// trailing `|| lstatSync(tarball).isSymbolicLink()` operand could never
+	// evaluate true and cost a second stat of the same path.
+	if (typeof tarball !== "string" || !existsSync(tarball) || !lstatSync(tarball).isFile()) {
 		fail("invalid_packed_dependency", "Packed worker dependency must be a regular tarball.");
 	}
 	const extraction = mkdtempSync(path.join(tmpdir(), "ceal-worker-release-extract-"));
@@ -431,7 +434,9 @@ function packPackage(packageDirectory: string, outputDirectory: string, dependen
 	if (!metadata || typeof metadata.filename !== "string" || typeof metadata.name !== "string")
 		fail("worker_package_pack_failed", "Worker package metadata is invalid.");
 	const artifact = path.join(outputDirectory, metadata.filename);
-	if (!existsSync(artifact) || !lstatSync(artifact).isFile() || lstatSync(artifact).isSymbolicLink())
+	// Same dead trailing operand as `stagePackedPackage` above: `lstatSync` does
+	// not follow, so `isFile()` already refuses a symlink.
+	if (!existsSync(artifact) || !lstatSync(artifact).isFile())
 		fail("worker_package_pack_failed", "Worker package output is unsafe.");
 	const bytes = readFileSync(artifact);
 	return {

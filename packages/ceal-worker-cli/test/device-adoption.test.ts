@@ -1,3 +1,4 @@
+import "../../../test/require-source-lane.ts";
 import { required as requiredValue } from "../../../test/required.ts";
 import type { CealCliIo, CealCommandRuntime } from "../dist/cli-runtime.js";
 import { verifyCealDeviceProof } from "../dist/device-proof.js";

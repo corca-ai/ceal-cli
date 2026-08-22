@@ -23,8 +23,10 @@ export function resolveAnchoredDirectory(
 		unsafe();
 	}
 	if (
+		// `observed.isSymbolicLink() ||` stood here and could never decide: `lstatSync`
+		// does not follow, so a symlink fails `isDirectory()` on the line below. The
+		// dev/ino comparison against the held descriptor is the real anchor check.
 		!observed.isDirectory() ||
-		observed.isSymbolicLink() ||
 		observed.dev !== expected.dev ||
 		observed.ino !== expected.ino ||
 		permissionMode(observed) !== expectedMode

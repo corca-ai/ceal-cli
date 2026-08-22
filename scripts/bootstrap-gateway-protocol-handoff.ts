@@ -354,7 +354,9 @@ function assertOutsideRepository(repoRoot: string, target: string): void {
 function requireRegularFile(file: string, code: string): string {
 	if (!existsSync(file)) fail(code, "Gateway handoff bootstrap input is missing.");
 	const stat = lstatSync(file);
-	if (!stat.isFile() || stat.isSymbolicLink()) fail(code, "Gateway handoff bootstrap input must be a regular file.");
+	// `lstatSync` does not follow, so a symlink already fails `isFile()` and a
+	// second `|| stat.isSymbolicLink()` operand could never evaluate true.
+	if (!stat.isFile()) fail(code, "Gateway handoff bootstrap input must be a regular file.");
 	return file;
 }
 

@@ -48,7 +48,9 @@ function findVerifiedInstaller(generationDirectory: string, inventory: string): 
 		const file = join(generationDirectory, name);
 		try {
 			const stat = lstatSync(file);
-			if (!stat.isFile() || stat.isSymbolicLink()) return [];
+			// `lstatSync` does not follow, so a symlink already fails `isFile()` and a
+			// second `|| stat.isSymbolicLink()` operand could never evaluate true.
+			if (!stat.isFile()) return [];
 			const expected = new RegExp(`^([^ ]+) {2}${escapePattern(name)}$`, "mu").exec(inventory)?.[1];
 			return isSha256Digest(expected) && expected === sha256(readFileSync(file)) ? [file] : [];
 		} catch {

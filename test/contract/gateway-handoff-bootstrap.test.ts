@@ -63,6 +63,28 @@ test("public bootstrap refuses checksum or remote-tag drift before producing a c
 	);
 });
 
+test("a downloaded asset that lands as a directory is refused", (context: TestContext) => {
+	// The DISCRIMINATING case for `requireRegularFile`'s `!stat.isFile()`. A
+	// symlink cannot name that branch: `lstatSync` does not follow, so a symlink
+	// fails `isFile()` as well, which is precisely why the `|| stat.isSymbolicLink()`
+	// operand beside it could never evaluate true. A directory is not a symlink, so
+	// only `!stat.isFile()` can refuse it. Measured: with that operand dropped the
+	// suite stayed green, because no test named this branch at all.
+	const fixture = publicFixture(context);
+	assert.throws(
+		() =>
+			bootstrapGatewayProtocolHandoff(
+				{ repoRoot: ROOT, tag: fixture.tag },
+				{
+					download: (_url: string, destination: string) => mkdirSync(destination, { recursive: true }),
+					resolveRemoteTag: () => fixture.producer.commit,
+					verifySignature: () => ({ actionsRunId: 42, runInvocationUri: "https://github.com/corca-ai/ceal/actions/runs/42/attempts/1" }),
+				},
+			),
+		(error) => error instanceof GatewayProtocolHandoffBootstrapError && error.code === "handoff_asset_unavailable",
+	);
+});
+
 test("the real verifier binds the certificate to workflow, repository, tag, commit, trigger, and issuer", () => {
 	const source = readFileSync(new URL("../../scripts/bootstrap-gateway-protocol-handoff.ts", import.meta.url), "utf8");
 	for (const flag of [

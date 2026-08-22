@@ -98,7 +98,10 @@ function sweepStaleTemporaries(directory: string, prefix: string, now: number): 
 		const stale = path.join(directory, name);
 		try {
 			const stat = lstatSync(stale);
-			if (!stat.isSymbolicLink() && stat.isFile() && now - stat.mtimeMs > STALE_TEMPORARY_AGE_MS) rmSync(stale, { force: true });
+			// Affirmative form of the same redundancy: `!stat.isSymbolicLink() &&` led
+			// this test, but under `lstatSync` `isFile()` is already false for a symlink,
+			// so the conjunct was true wherever it was reached.
+			if (stat.isFile() && now - stat.mtimeMs > STALE_TEMPORARY_AGE_MS) rmSync(stale, { force: true });
 		} catch {
 			/* best effort; never block the write */
 		}

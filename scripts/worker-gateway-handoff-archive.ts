@@ -386,7 +386,9 @@ function requireRegularAbsoluteFile(value: unknown, code: string): string {
 function requireRegularFile(filePath: string, code: string): string {
 	if (!existsSync(filePath)) fail(code, "Required Gateway handoff file is missing.");
 	const stat = lstatSync(filePath);
-	if (!stat.isFile() || stat.isSymbolicLink()) fail(code, "Required Gateway handoff file must be regular and non-symlinked.");
+	// `lstatSync` does not follow, so a symlink already fails `isFile()` and a
+	// second `|| stat.isSymbolicLink()` operand could never evaluate true.
+	if (!stat.isFile()) fail(code, "Required Gateway handoff file must be regular and non-symlinked.");
 	return filePath;
 }
 

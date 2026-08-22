@@ -1,3 +1,4 @@
+import "../../../test/require-source-lane.ts";
 import type { LeasedConsumerControlSessionRuntime, LeasedConsumerNotificationRuntime } from "../dist/leased-consumer-control-session.js";
 import {
 	isInheritedNotificationChannelFd,

@@ -8,19 +8,21 @@
 	"engines": {
 		"node": ">=22.19.0"
 	},
+	"overrides": {
+		"@corca-ai/ceal-protocol": "file:vendor/ceal-protocol/corca-ai-ceal-protocol-0.73.0.tgz"
+	},
 	"workspaces": [
-		"packages/ceal-protocol",
 		"packages/ceal-client",
 		"packages/ceal-worker-cli"
 	],
 	"scripts": {
 		"build": "npm run build:worker",
-		"build:worker": "node scripts/generate-leased-consumer-attachment-stream-runtime.ts && node scripts/generate-leased-consumer-handoff-runtime.ts && node test/repo-build.ts packages/ceal-protocol packages/ceal-client packages/ceal-worker-cli",
+		"build:worker": "node scripts/generate-leased-consumer-attachment-stream-runtime.ts && node scripts/generate-leased-consumer-handoff-runtime.ts && node test/repo-build.ts packages/ceal-client packages/ceal-worker-cli",
 		"materialize:gateway-protocol-source": "node scripts/materialize-signed-gateway-protocol-source.ts",
 		"test:unit": "npm run coverage",
 		"test:contract": "npm run build && npm run test:contract:built",
-		"test:contract:built": "node test/run-source-tests.ts packages/ceal-protocol/test/conformance.test.ts packages/ceal-protocol/test/device-enrollment.test.ts packages/ceal-protocol/test/enrollment.test.ts packages/ceal-protocol/test/gateway-proof-claims.test.ts packages/ceal-protocol/test/gateway-write-identity.test.ts packages/ceal-protocol/test/leased-consumer-attachment-stream.test.ts packages/ceal-protocol/test/leased-consumer-capability-catalog.test.ts packages/ceal-protocol/test/leased-consumer-control-v4.test.ts packages/ceal-protocol/test/leased-consumer-control.test.ts packages/ceal-protocol/test/leased-consumer-disposition-control.test.ts packages/ceal-protocol/test/leased-consumer-file-upload.test.ts packages/ceal-protocol/test/personal-client-session.test.ts packages/ceal-protocol/test/protocol-negotiation.test.ts packages/ceal-protocol/test/result-materialization.test.ts packages/ceal-protocol/test/wire-boundary-response.test.ts packages/ceal-protocol/test/wire-boundary.test.ts packages/ceal-worker-cli/test/leased-consumer-attachment-stream-carrier.test.ts test/check-docs-graph.test.ts test/contract/leased-consumer-control-conformance-projection.test.ts test/contract/no-legacy-mjs.test.ts test/contract/legacy-mjs-conversion.test.ts && node --test test/contract/gateway-handoff-bootstrap.test.ts test/contract/gateway-leased-consumer-call-handoff.test.ts test/contract/pre-push-lock.test.ts test/contract/prewarm-offline-consumer-cache.test.ts test/contract/one-fact-one-home.test.ts test/contract/probe-surface.test.ts test/contract/production-reachability.test.ts test/contract/protocol-vendor-pin.test.ts test/contract/repo-build.test.ts test/contract/repo-gates.test.ts test/contract/safe-output-path.test.ts test/contract/script-lib.test.ts test/contract/source-loader.test.ts test/contract/source-worker-e2e.test.ts test/contract/typecheck-ratchet.test.ts test/contract/typecheck-source-gate.test.ts test/contract/worker-acceptance-packet.test.ts test/contract/worker-gateway-handoff-archive.test.ts test/contract/worker-guide-contract.test.ts test/contract/worker-release-assets.test.ts test/contract/worker-release-inputs.test.ts",
-		"test:release": "node --test test/client-artifact.test.ts test/gateway-protocol-consumer.test.ts test/npm-pack-metadata.test.ts test/package-bin.test.ts test/release-process-supervisor.test.ts test/worker-native-artifact.test.ts test/worker-release-installer.test.ts test/worker-release-package.test.ts",
+		"test:contract:built": "node test/run-source-tests.ts packages/ceal-worker-cli/test/leased-consumer-attachment-stream-carrier.test.ts test/source/*.test.ts && node --test test/contract/*.test.ts",
+		"test:release": "node --test test/*.test.ts",
 		"test:tiers": "npm run test:contract && npm run test:release",
 		"test": "npm run test:unit && npm run coverage:scripts",
 		"coverage": "npm --ignore-scripts --prefix packages/ceal-client run coverage && npm --ignore-scripts --prefix packages/ceal-worker-cli run coverage",
@@ -38,6 +40,7 @@
 		"lint:types:watch": "tsc -p tsconfig.typecheck.json --pretty false --watch --tsBuildInfoFile node_modules/.cache/ceal-typecheck-watch.tsbuildinfo",
 		"lint:types:tools:watch": "tsc -p tsconfig.tools.json --pretty false --watch --tsBuildInfoFile node_modules/.cache/ceal-tools-typecheck-watch.tsbuildinfo",
 		"lint:node-modules-drift": "node scripts/check-node-modules-drift.ts",
+		"lint:protocol-artifact": "node scripts/verify-protocol-vendor-pin.ts",
 		"lint:no-legacy-mjs": "node scripts/check-no-legacy-mjs.ts",
 		"lint:source-nul-bytes": "node scripts/check-source-nul-bytes.ts --repo-root .",
 		"lint:source-nul-bytes:staged": "node scripts/check-source-nul-bytes.ts --repo-root . --staged",
@@ -49,8 +52,8 @@
 		"lint:import-hard-failures:staged": "node scripts/check-import-hard-failures.ts --repo-root . --staged",
 		"write:no-legacy-mjs-baseline": "node scripts/check-no-legacy-mjs.ts --write-baseline",
 		"lint:fix": "eslint . --fix",
-		"check": "npm run lint && npm run lint:secrets && npm run lint:import-hard-failures && npm run lint:no-legacy-mjs && npm run lint:source-nul-bytes && npm run lint:markdown && npm run build && npm run lint:types && npm run lint:unused && npm run lint:reachability && npm run lint:store-lock && npm run lint:duplicate-literal && npm test",
-		"check:unit": "npm run lint && npm run lint:secrets && npm run lint:import-hard-failures && npm run lint:no-legacy-mjs && npm run lint:source-nul-bytes && npm run lint:markdown && npm run build && npm run lint:types && npm run lint:unused && npm run lint:reachability && npm run lint:store-lock && npm run lint:duplicate-literal && npm run test:unit && npm run test:contract:built",
+		"check": "npm run lint && npm run lint:protocol-artifact && npm run lint:secrets && npm run lint:import-hard-failures && npm run lint:no-legacy-mjs && npm run lint:source-nul-bytes && npm run lint:markdown && npm run build && npm run lint:types && npm run lint:unused && npm run lint:reachability && npm run lint:store-lock && npm run lint:duplicate-literal && npm test",
+		"check:unit": "npm run lint && npm run lint:protocol-artifact && npm run lint:secrets && npm run lint:import-hard-failures && npm run lint:no-legacy-mjs && npm run lint:source-nul-bytes && npm run lint:markdown && npm run build && npm run lint:types && npm run lint:unused && npm run lint:reachability && npm run lint:store-lock && npm run lint:duplicate-literal && npm run test:unit && npm run test:contract:built",
 		"postcheck": "node scripts/gate-attestation.ts record",
 		"check:protocol-dev": "node scripts/verify-protocol-vendor-pin.ts --development && npm --prefix packages/ceal-client test",
 		"hooks:install": "node scripts/install-git-hooks.ts",
@@ -79,6 +82,7 @@
 		"yaml": "2.9.0"
 	},
 	"devDependencies": {
+		"@corca-ai/ceal-protocol": "file:vendor/ceal-protocol/corca-ai-ceal-protocol-0.73.0.tgz",
 		"@secretlint/secretlint-rule-aws": "^11.7.1",
 		"@secretlint/secretlint-rule-openai": "^11.7.1",
 		"@secretlint/secretlint-rule-pattern": "^11.7.1",

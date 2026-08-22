@@ -22,7 +22,6 @@
 		"incremental": true,
 		"tsBuildInfoFile": "./node_modules/.cache/ceal-typecheck.tsbuildinfo",
 		"paths": {
-			"@corca-ai/ceal-protocol": ["./packages/ceal-protocol/src/index.ts"],
 			"@corca-ai/ceal": ["./packages/ceal-client/src/index.ts"]
 		}
 	},

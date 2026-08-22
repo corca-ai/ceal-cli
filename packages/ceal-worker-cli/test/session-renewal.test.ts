@@ -1,3 +1,4 @@
+import "../../../test/require-source-lane.ts";
 import { requireCealCallRenewalMode, requireCealSessionRenewalMode } from "../dist/session-renewal.js";
 import type { CealSessionRenewalMode } from "../src/session-renewal.ts";
 import assert from "node:assert/strict";

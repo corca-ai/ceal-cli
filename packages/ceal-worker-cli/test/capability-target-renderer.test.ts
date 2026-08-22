@@ -1,3 +1,4 @@
+import "../../../test/require-source-lane.ts";
 import { renderCapabilityTargets } from "../dist/index.js";
 import type { CealGatewayDiscoveryCapability, CealGatewayDiscoveryTarget, CealGatewayRateLimitPolicy } from "@corca-ai/ceal-protocol";
 import assert from "node:assert/strict";

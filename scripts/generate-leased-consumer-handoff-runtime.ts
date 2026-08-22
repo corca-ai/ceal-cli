@@ -7,15 +7,16 @@ import { isStringArray } from "./lib/string-array.ts";
 import { isStringMap } from "./lib/string-map.ts";
 import { writeIfChanged } from "./lib/write-if-changed.ts";
 import { verifyGatewayLeasedConsumerCallHandoff } from "./verify-gateway-leased-consumer-call-handoff.ts";
+import { execFileSync } from "node:child_process";
 import { createHash } from "node:crypto";
-import { readFileSync } from "node:fs";
+import { readdirSync, readFileSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const LOCK_PATH = "gateway-leased-consumer-call-handoff-lock.json";
 const HANDOFF_PATH = "vendor/gateway-leased-consumer-call/gateway-leased-consumer-call-conformance.json";
-const PROTOCOL_MANIFEST_PATH = "packages/ceal-protocol/package.json";
+const PROTOCOL_VENDOR_DIRECTORY = "vendor/ceal-protocol";
 const OUTPUT_PATH = "packages/ceal-worker-cli/src/generated/leased-consumer-handoff.ts";
 const CARRIER_CONTRACT_PATH = "packages/ceal-worker-cli/leased-consumer-carrier-contract.json";
 const CARRIER_CONTRACT_OUTPUT_PATH = "packages/ceal-worker-cli/src/generated/leased-consumer-carrier-contract.ts";
@@ -477,9 +478,30 @@ function readJsonContract(file: string, errorCode: string): { bytes: Buffer; val
 	}
 }
 
+/**
+ * The version declared INSIDE the vendored archive, read back out of the tarball.
+ *
+ * The caller compares this against the signed handoff lock, and the comparison is
+ * only worth making because the two are independent: the lock is what a release
+ * consumes, and this is what the archive says about itself. Reading the version
+ * from the lock instead would have compared the lock to itself and quietly retired
+ * the cross-check -- which is exactly what happened on the first attempt at this
+ * cutover, and what `worker-release-assets.test.ts` caught.
+ *
+ * The archive is used rather than `node_modules`, because the fixture repositories
+ * that drive this generator carry the vendored archive but install nothing.
+ */
 function readProtocolPackageVersion(repoRoot: string): string {
 	try {
-		const parsed: unknown = JSON.parse(readFileSync(path.join(repoRoot, PROTOCOL_MANIFEST_PATH), "utf8"));
+		const vendored = readdirSync(path.join(repoRoot, PROTOCOL_VENDOR_DIRECTORY)).filter((name) => name.endsWith(".tgz"));
+		const [archive] = vendored;
+		if (vendored.length !== 1 || archive === undefined) throw new Error("invalid_protocol_manifest");
+		const parsed: unknown = JSON.parse(
+			execFileSync("tar", ["-xOzf", path.join(repoRoot, PROTOCOL_VENDOR_DIRECTORY, archive), "package/package.json"], {
+				encoding: "utf8",
+				stdio: ["ignore", "pipe", "ignore"],
+			}),
+		);
 		if (
 			!isJsonRecord(parsed) ||
 			parsed.name !== "@corca-ai/ceal-protocol" ||

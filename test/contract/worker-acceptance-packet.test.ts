@@ -32,10 +32,18 @@ import { fileURLToPath } from "node:url";
 // running it against a real install, which no gate can fabricate.
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..", "..");
 const CONTRACT_REPO = createProtocolRepoFixture({ acceptanceCli: true });
-const DIVERGED_REPO = createProtocolRepoFixture({ diverged: true });
+// Was a `diverged: true` fixture. Proof/ship divergence is unreachable now -- the
+// repository consumes the signed archive itself -- so the ordering this test exists
+// to pin is re-expressed against the failure that IS reachable: an archive whose
+// bytes are not the ones the lock binds.
+const MISMATCHED_ARTIFACT_REPO = createProtocolRepoFixture();
+{
+	const lock = JSON.parse(readFileSync(path.join(MISMATCHED_ARTIFACT_REPO.root, "gateway-protocol-handoff-lock.json"), "utf8"));
+	writeFileSync(path.join(MISMATCHED_ARTIFACT_REPO.root, "vendor/ceal-protocol", lock.protocol.filename), "not the signed archive");
+}
 test.after(() => {
 	CONTRACT_REPO.cleanup();
-	DIVERGED_REPO.cleanup();
+	MISMATCHED_ARTIFACT_REPO.cleanup();
 });
 
 type JsonRecord = Record<string, unknown>;
@@ -432,9 +440,11 @@ test("a binary that cannot answer 'version' is refused rather than described", a
 });
 
 test("acceptance reaches the protocol ship guard before resolving an installed binary", async () => {
+	// The binary is deliberately absent: if the guard ran second, the rejection
+	// would name a missing binary instead of the artifact.
 	await assert.rejects(
-		() => buildAcceptancePacket({ repoRoot: DIVERGED_REPO.root, binary: path.join(DIVERGED_REPO.root, "absent") }),
-		code("proof_shipment_protocol_divergence"),
+		() => buildAcceptancePacket({ repoRoot: MISMATCHED_ARTIFACT_REPO.root, binary: path.join(MISMATCHED_ARTIFACT_REPO.root, "absent") }),
+		code("vendored_artifact_mismatch"),
 	);
 });
 

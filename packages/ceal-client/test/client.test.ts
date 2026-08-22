@@ -1,3 +1,4 @@
+import "../../../test/require-source-lane.ts";
 import { type CealClientTransport, createCealClient } from "../src/index.ts";
 import type { CealGatewayRequest, CealGatewayResponseFor } from "@corca-ai/ceal-protocol";
 import assert from "node:assert/strict";

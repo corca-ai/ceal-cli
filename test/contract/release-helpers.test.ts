@@ -41,6 +41,14 @@ test("release owners preserve matching versions and reject mismatch or symlinked
 		assert.equal(isRegularNonSymlinkDirectory(realDirectory), true);
 		assert.equal(isRegularNonSymlinkDirectory(link), false);
 		assert.equal(isRegularNonSymlinkDirectory(path.join(repoRoot, "missing")), false);
+		// The DISCRIMINATING case, and the reason the other three are not enough.
+		// A symlink is refused by `isDirectory()` on its own, because `lstatSync`
+		// does not follow -- so the three assertions above stayed green with
+		// `isDirectory()` deleted, and named no branch at all. A regular file is
+		// not a symlink, so only `isDirectory()` can refuse it.
+		const regularFile = path.join(repoRoot, "not-a-directory");
+		writeFileSync(regularFile, "");
+		assert.equal(isRegularNonSymlinkDirectory(regularFile), false);
 	} finally {
 		rmSync(repoRoot, { recursive: true, force: true });
 	}

@@ -1,3 +1,4 @@
+import "../../../test/require-source-lane.ts";
 import { CealSessionStoreError, type CealStoredSession, createCealSessionStore } from "../dist/profile-store.js";
 import assert from "node:assert/strict";
 import { chmodSync, mkdtempSync, readFileSync, rmSync, symlinkSync } from "node:fs";

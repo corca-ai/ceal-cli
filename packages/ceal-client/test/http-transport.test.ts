@@ -1,3 +1,4 @@
+import "../../../test/require-source-lane.ts";
 import {
 	CEAL_DEFAULT_HTTP_TIMEOUT_MS,
 	CEAL_GATEWAY_AUDIT_TIMING_ACCEPT_HEADER,

@@ -391,7 +391,9 @@ function readDropFile(file: string): { identity: string; count: number } | null 
 function dropsFileStat(file: string): { size: number } | null {
 	try {
 		const stat = lstatSync(file);
-		return !stat.isSymbolicLink() && stat.isFile() ? { size: stat.size } : null;
+		// Same affirmative redundancy as `local-store-file`: `isFile()` is what
+		// excludes a symlink, because `lstatSync` does not follow.
+		return stat.isFile() ? { size: stat.size } : null;
 	} catch {
 		return null;
 	}

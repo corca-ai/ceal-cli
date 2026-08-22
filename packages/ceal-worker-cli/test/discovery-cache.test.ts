@@ -1,3 +1,4 @@
+import "../../../test/require-source-lane.ts";
 import type { CealDiscoveryCacheEntry, CealDiscoveryCacheKey } from "../dist/discovery-cache.js";
 import { CealDiscoveryCacheStoreError, createCealDiscoveryCacheStore, discoveryCacheEntryUsable } from "../dist/discovery-cache.js";
 import assert from "node:assert/strict";

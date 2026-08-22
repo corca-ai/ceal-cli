@@ -1,3 +1,4 @@
+import "../../../test/require-source-lane.ts";
 import {
 	classifiedClientSessionFailureReasons,
 	classifyClientSessionFailure,

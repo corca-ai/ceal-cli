@@ -1,5 +1,4 @@
 import assert from "node:assert/strict";
-import { execFileSync } from "node:child_process";
 import type { BinaryLike } from "node:crypto";
 import { createHash } from "node:crypto";
 import { cpSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
@@ -213,6 +212,32 @@ test("output directory refuses a relative path before resolving it", () => {
 	);
 });
 
+test("output directory refuses a regular file standing where the directory belongs", (context) => {
+	// The DISCRIMINATING case for `!lstatSync(directory).isDirectory()`, and the
+	// reason a symlink case cannot stand in for it. A symlink never even reaches
+	// this line -- `assertNoSymlinkComponents` walks every component including the
+	// leaf and refuses it earlier, with a different message. A regular file is
+	// neither a symlink nor a directory, so this branch is the only thing that can
+	// refuse it. Measured: with the branch dropped, the suite stayed green.
+	const root = mkdtempSync(path.join(tmpdir(), "ceal-output-directory-file-"));
+	context.after(() => rmSync(root, { recursive: true, force: true }));
+	const occupied = path.join(root, "output");
+	writeFileSync(occupied, "");
+	assert.throws(
+		() =>
+			inspectOutputDirectory(occupied, {
+				repoRoot: REPO_ROOT,
+				force: false,
+				subject: "Worker release assets output",
+				marker: ".ceal-worker-release-assets",
+				fail: (code: string, message: string): never => {
+					throw new Error(`${code}:${message}`);
+				},
+			}),
+		/unsafe_output/u,
+	);
+});
+
 test("forced publish restores the marked output when staging rename fails", (context) => {
 	const root = realpathSync(mkdtempSync(path.join(tmpdir(), "ceal-output-publish-restore-")));
 	context.after(() => rmSync(root, { recursive: true, force: true }));
@@ -296,9 +321,8 @@ test("native source verification refuses a stale generated control-session contr
 	context.after(() => rmSync(root, { recursive: true, force: true }));
 	const generated = path.join(root, "packages", "ceal-worker-cli", "src", "generated");
 	mkdirSync(generated, { recursive: true });
-	const protocolManifest = path.join(root, "packages", "ceal-protocol", "package.json");
-	mkdirSync(path.dirname(protocolManifest), { recursive: true });
-	writeFileSync(protocolManifest, readFileSync(path.join(REPO_ROOT, "packages", "ceal-protocol", "package.json")));
+	// The Protocol version comes from the handoff lock this fixture writes below,
+	// not from a vendored package manifest -- there is no longer one to copy.
 	writeFileSync(
 		path.join(root, "packages", "ceal-worker-cli", "leased-consumer-control-session-contract.json"),
 		CONTROL_SESSION_CONTRACT_BYTES,
@@ -307,6 +331,7 @@ test("native source verification refuses a stale generated control-session contr
 		path.join(root, "gateway-protocol-handoff-lock.json"),
 		readFileSync(path.join(REPO_ROOT, "gateway-protocol-handoff-lock.json")),
 	);
+	stageVendoredProtocolArchive(root);
 	writeFileSync(
 		path.join(generated, "leased-consumer-control-session-contract.ts"),
 		'export const LEASED_CONSUMER_CONTROL_SESSION_CONTRACT_JSON = "{}" as const;\nexport const LEASED_CONSUMER_CONTROL_SESSION_CONTRACT_SHA256 = "' +
@@ -321,9 +346,6 @@ test("private control-session release input accepts only the signed v6 dispositi
 	context.after(() => rmSync(root, { recursive: true, force: true }));
 	const contractPath = path.join(root, "packages", "ceal-worker-cli", "leased-consumer-control-session-contract.json");
 	mkdirSync(path.dirname(contractPath), { recursive: true });
-	const protocolManifestPath = path.join(root, "packages", "ceal-protocol", "package.json");
-	mkdirSync(path.dirname(protocolManifestPath), { recursive: true });
-	writeFileSync(protocolManifestPath, readFileSync(path.join(REPO_ROOT, "packages", "ceal-protocol", "package.json")));
 	const generatedPath = path.join(root, "packages", "ceal-worker-cli", "src", "generated", "leased-consumer-control-session-contract.ts");
 	mkdirSync(path.dirname(generatedPath), { recursive: true });
 	writeFileSync(
@@ -334,6 +356,7 @@ test("private control-session release input accepts only the signed v6 dispositi
 		path.join(root, "gateway-protocol-handoff-lock.json"),
 		readFileSync(path.join(REPO_ROOT, "gateway-protocol-handoff-lock.json")),
 	);
+	stageVendoredProtocolArchive(root);
 	const current = JSON.parse(CONTROL_SESSION_CONTRACT_BYTES.toString("utf8"));
 	writeFileSync(contractPath, `${JSON.stringify(current, null, 2)}\n`);
 	const accepted = readControlSessionContract(contractPath, { repoRoot: root }).value;
@@ -343,15 +366,17 @@ test("private control-session release input accepts only the signed v6 dispositi
 	assert.equal(accepted.gateway.routes.materialization, "/api/ceal/agent/v1/control/materialization");
 	assert.equal(accepted.gateway.routes.notification_receipt, "/api/ceal/agent/v1/control/notification-receipt");
 	assert.deepEqual(accepted.gateway.operation_deadline_bounds_ms, { minimum: 30000, maximum: 600000 });
-	const mismatchedProtocolManifest = JSON.parse(readFileSync(protocolManifestPath, "utf8"));
-	mismatchedProtocolManifest.version = "0.72.20";
-	writeFileSync(protocolManifestPath, `${JSON.stringify(mismatchedProtocolManifest, null, 2)}\n`);
+	const lockPath = path.join(root, "gateway-protocol-handoff-lock.json");
+	const signedLockBytes = readFileSync(lockPath);
+	const mismatchedLock = JSON.parse(signedLockBytes.toString("utf8"));
+	mismatchedLock.protocol.version = "0.72.20";
+	writeFileSync(lockPath, `${JSON.stringify(mismatchedLock, null, 2)}\n`);
 	assert.throws(
 		() => readControlSessionContract(contractPath, { repoRoot: root }),
 		/invalid_control_session_contract/u,
-		"the signed handoff lock cannot drift from the vendored Protocol manifest",
+		"the generated contract cannot drift from the Protocol version the signed handoff lock binds",
 	);
-	writeFileSync(protocolManifestPath, readFileSync(path.join(REPO_ROOT, "packages/ceal-protocol/package.json")));
+	writeFileSync(lockPath, signedLockBytes);
 	const legacyDeadline = structuredClone(current);
 	legacyDeadline.gateway.operation_deadline_ms = 30000;
 	delete legacyDeadline.gateway.operation_deadline_bounds_ms;
@@ -585,6 +610,31 @@ test("merged worker release sets stay pair-complete with byte-identical shared a
 	);
 });
 
+test("merge refuses a directory standing where a composed asset belongs", async (context) => {
+	// The DISCRIMINATING case for `readStagedFile`'s `!lstatSync(file).isFile()`.
+	// A symlink cannot name that branch: `lstatSync` does not follow, so a symlink
+	// fails `isFile()` too, which is why the trailing
+	// `|| lstatSync(file).isSymbolicLink()` operand beside it could never evaluate
+	// true and cost a second stat of the same path. A directory is not a symlink,
+	// so `!isFile()` is the only operand that can refuse it. Measured: with that
+	// operand dropped the suite stayed green -- the branch had no test at all.
+	const root = realpathSync(mkdtempSync(path.join(tmpdir(), "ceal-worker-assets-directory-asset-")));
+	context.after(() => rmSync(root, { recursive: true, force: true }));
+	const repoRoot = fixtureRepo(root);
+	const input = path.join(root, "assets-linux-arm64");
+	await composeWorkerReleaseAssets(
+		{ outputDirectory: input, gatewayHandoffArchive: "/unused/fixture.tar.gz", repoRoot },
+		{ buildNative: fakeNativeBuild("linux-arm64", "0.65.0") },
+	);
+	const manifest = path.join(input, "ceal-worker-release-manifest-linux-arm64.json");
+	rmSync(manifest);
+	mkdirSync(manifest, { recursive: true });
+	assert.throws(
+		() => mergeWorkerReleaseAssetSets({ outputDirectory: path.join(root, "merged"), inputs: [input], repoRoot }),
+		hasCode("merge_input_incomplete"),
+	);
+});
+
 test("merge rejects duplicate checksum entries within one input set", async (context) => {
 	const root = realpathSync(mkdtempSync(path.join(tmpdir(), "ceal-worker-assets-duplicate-")));
 	context.after(() => rmSync(root, { recursive: true, force: true }));
@@ -603,8 +653,8 @@ test("merge rejects duplicate checksum entries within one input set", async (con
 	);
 });
 
-test("merge refuses a declared proof and shipment Protocol divergence before reading composed assets", async (context) => {
-	const root = realpathSync(mkdtempSync(path.join(tmpdir(), "ceal-worker-assets-diverged-")));
+test("merge refuses an unshippable Protocol artifact before reading composed assets", async (context) => {
+	const root = realpathSync(mkdtempSync(path.join(tmpdir(), "ceal-worker-assets-unshippable-")));
 	context.after(() => rmSync(root, { recursive: true, force: true }));
 	const repoRoot = fixtureRepo(root);
 	const missingInput = path.join(root, "missing-assets");
@@ -612,11 +662,13 @@ test("merge refuses a declared proof and shipment Protocol divergence before rea
 		() => mergeWorkerReleaseAssetSets({ outputDirectory: path.join(root, "converged-output"), inputs: [missingInput], repoRoot }),
 		hasCode("merge_inputs_required"),
 	);
-	declareFixtureDivergence(repoRoot);
+	// Ordering is the point: with a shippable Protocol the same call fails on the
+	// missing inputs above, so a protocol error here proves the guard ran first.
+	corruptFixtureProtocolArtifact(repoRoot);
 	const outputDirectory = path.join(root, "merged");
 	assert.throws(
 		() => mergeWorkerReleaseAssetSets({ outputDirectory, inputs: [missingInput], repoRoot }),
-		hasCode("proof_shipment_protocol_divergence"),
+		hasCode("vendored_artifact_mismatch"),
 	);
 	assert.equal(existsSync(outputDirectory), false);
 });
@@ -960,50 +1012,47 @@ function fixtureRepo(root: string): string {
 	writeGatewayHandoffFixture(repo);
 	if (!existsSync(path.join(repo, ".git"))) {
 		const lock = JSON.parse(readFileSync(path.join(REPO_ROOT, "gateway-protocol-handoff-lock.json"), "utf8"));
-		materializeGitTree(lock.gateway.protocol_tree, path.join(repo, "packages", "ceal-protocol"));
+		// The real signed archive, copied. Materializing a Git tree into
+		// packages/ceal-protocol is what this used to do, and there is no longer any
+		// such tree to materialize -- nor a pin to reconcile it against.
+		mkdirSync(path.join(repo, "vendor", "ceal-protocol"), { recursive: true });
+		cpSync(
+			path.join(REPO_ROOT, "vendor", "ceal-protocol", lock.protocol.filename),
+			path.join(repo, "vendor", "ceal-protocol", lock.protocol.filename),
+		);
+		writeFileSync(path.join(repo, "gateway-protocol-handoff-lock.json"), `${JSON.stringify(lock, null, 2)}\n`);
 		runFixtureGit(repo, ["init", "--quiet"]);
 		runFixtureGit(repo, ["config", "user.name", "Ceal Release Assets Fixture"]);
 		runFixtureGit(repo, ["config", "user.email", "fixture@invalid.example"]);
 		runFixtureGit(repo, ["add", "."]);
 		runFixtureGit(repo, ["commit", "--quiet", "-m", "fixture: seed release assets checkout"]);
-		const protocolTree = runFixtureGit(repo, ["rev-parse", "HEAD:packages/ceal-protocol"]);
-		writeFileSync(path.join(repo, "gateway-protocol-handoff-lock.json"), `${JSON.stringify(lock, null, 2)}\n`);
-		const pin = JSON.parse(readFileSync(path.join(REPO_ROOT, "protocol-vendor-pin.json"), "utf8"));
-		pin.source.commit = lock.gateway.commit;
-		pin.source.tree = protocolTree;
-		pin.shipped.status = "agreed";
-		pin.shipped.gateway_commit = lock.gateway.commit;
-		pin.shipped.protocol_tree = protocolTree;
-		delete pin.shipped.reason;
-		delete pin.shipped.disposition_owner;
-		delete pin.shipped.disposition_request;
-		writeFileSync(path.join(repo, "protocol-vendor-pin.json"), `${JSON.stringify(pin, null, 2)}\n`);
-		runFixtureGit(repo, ["add", "."]);
-		runFixtureGit(repo, ["commit", "--quiet", "-m", "fixture: converge release Protocol identity"]);
 	}
 	return repo;
 }
 
-function declareFixtureDivergence(repo: string): void {
-	const request = "docs/protocol-quarantine.md";
-	const pinPath = path.join(repo, "protocol-vendor-pin.json");
-	const pin = JSON.parse(readFileSync(pinPath, "utf8"));
-	pin.source.commit = "d".repeat(40);
-	pin.shipped.status = "diverged";
-	pin.shipped.reason = "fixture divergence";
-	pin.shipped.disposition_owner = "fixture";
-	pin.shipped.disposition_request = request;
-	mkdirSync(path.dirname(path.join(repo, request)), { recursive: true });
-	writeFileSync(path.join(repo, request), "# Fixture divergence\n");
-	writeFileSync(pinPath, `${JSON.stringify(pin, null, 2)}\n`);
+// Replaces `declareFixtureDivergence`. A declared proof/ship divergence has no
+// constructor any more -- the tested archive IS the shipped archive -- so the
+// unshippable state a release must refuse is now an archive whose bytes are not the
+// ones the lock binds.
+function corruptFixtureProtocolArtifact(repo: string): void {
+	const lock = JSON.parse(readFileSync(path.join(repo, "gateway-protocol-handoff-lock.json"), "utf8"));
+	writeFileSync(path.join(repo, "vendor", "ceal-protocol", lock.protocol.filename), "not the signed archive");
 	runFixtureGit(repo, ["add", "."]);
-	runFixtureGit(repo, ["commit", "--quiet", "-m", "fixture: declare Protocol divergence"]);
+	runFixtureGit(repo, ["commit", "--quiet", "-m", "fixture: corrupt the vendored Protocol archive"]);
 }
 
-function materializeGitTree(tree: string, destination: string): void {
-	mkdirSync(destination, { recursive: true });
-	const archive = execFileSync("git", ["archive", tree], { cwd: REPO_ROOT });
-	execFileSync("tar", ["-xf", "-", "-C", destination], { input: archive });
+/**
+ * Stage the signed Protocol archive a scratch root needs before anything reads the
+ * control-session contract: that read compares the handoff lock against the version
+ * the archive declares about itself, and an absent archive is a refusal, not a skip.
+ */
+function stageVendoredProtocolArchive(root: string): void {
+	const lock = JSON.parse(readFileSync(path.join(REPO_ROOT, "gateway-protocol-handoff-lock.json"), "utf8"));
+	mkdirSync(path.join(root, "vendor", "ceal-protocol"), { recursive: true });
+	cpSync(
+		path.join(REPO_ROOT, "vendor", "ceal-protocol", lock.protocol.filename),
+		path.join(root, "vendor", "ceal-protocol", lock.protocol.filename),
+	);
 }
 
 function writeGatewayHandoffFixture(root: string): void {

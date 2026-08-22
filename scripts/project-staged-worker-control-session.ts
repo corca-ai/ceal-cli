@@ -1,11 +1,11 @@
 #!/usr/bin/env node
 
+import { contractModule, controlSessionContractFromVerifiedConformance } from "./generate-leased-consumer-handoff-runtime.ts";
+import type { JsonRecord } from "./lib/json-record.ts";
 import type {
 	CealLeasedConsumerDispositionControlRequest,
 	CealLeasedConsumerDispositionControlResponse,
-} from "../packages/ceal-protocol/src/leased-consumer-disposition-control.ts";
-import { contractModule, controlSessionContractFromVerifiedConformance } from "./generate-leased-consumer-handoff-runtime.ts";
-import type { JsonRecord } from "./lib/json-record.ts";
+} from "@corca-ai/ceal-protocol";
 import { createHash } from "node:crypto";
 import { readFileSync, writeFileSync } from "node:fs";
 import path from "node:path";

@@ -641,7 +641,10 @@ function requireAssetDirectory(value: unknown): AssetDirectory {
 }
 
 function readStagedFile(file: string, code: string): Buffer {
-	if (!existsSync(file) || !lstatSync(file).isFile() || lstatSync(file).isSymbolicLink())
+	// `lstatSync` does not follow, so `isFile()` already refuses a symlink and the
+	// trailing `|| lstatSync(file).isSymbolicLink()` operand could never evaluate
+	// true; it also cost a second stat of the same path.
+	if (!existsSync(file) || !lstatSync(file).isFile())
 		fail(code, `Worker release asset input ${path.basename(file)} is unavailable.`);
 	return readFileSync(file);
 }

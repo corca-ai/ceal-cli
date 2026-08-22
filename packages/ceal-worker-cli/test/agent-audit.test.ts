@@ -1,3 +1,4 @@
+import "../../../test/require-source-lane.ts";
 import { required as requiredValue } from "../../../test/required.ts";
 import type { CealAgentAuditState, CealAgentSessionEventsLookup } from "../dist/agent-audit.js";
 import {
@@ -252,6 +253,90 @@ test("agent audit reports inactive, stale, and unknown honestly", () => {
 		const refused = adapterFor(inspectAgentAudit(home, {}, NOW), "claude");
 		assert.equal(refused.health, "unknown");
 		assert.equal(refused.sessions, undefined);
+	});
+});
+
+test("irregular entries in the Claude tree are skipped without truncating the inventory", () => {
+	withHome((home) => {
+		// The DISCRIMINATING cases for the two type tests in `collectClaudeSessions`.
+		// The symlinked session in the inventory test above cannot serve: `lstatSync`
+		// does not follow, so a symlink fails `isFile()` and `isDirectory()` too,
+		// and it passed with either operand. These two are neither symlinks nor the
+		// expected type, so only the type test can refuse them.
+		const projects = path.join(home, ".claude", "projects");
+		const project = path.join(projects, "-home-user-codes-repo");
+		mkdirSync(project, { recursive: true });
+		writeSession(project, "11111111-2222-3333-4444-555555555555.jsonl", NOW - 60_000, '{"type":"mode"}\n');
+
+		// A DIRECTORY named like a transcript. Counted as a session if `!isFile()`
+		// stops refusing it.
+		mkdirSync(path.join(project, "dddddddd-1111-2222-3333-444444444444.jsonl"));
+		// A regular FILE where a project directory belongs. If `!isDirectory()`
+		// stops refusing it, the walk tries to read it as a directory, fails, and
+		// declares the whole inventory partial.
+		writeFileSync(path.join(projects, "-not-a-project"), "");
+
+		const claude = adapterFor(inspectAgentAudit(home, {}, NOW), "claude");
+		assert.equal(claude.sessionCount, 1, "a directory named like a transcript is not a session");
+		assert.notEqual(claude.inventory, "partial", "a regular file among the projects must not truncate the walk");
+	});
+});
+
+test("irregular entries in the Codex tree are skipped without truncating the inventory", () => {
+	withHome((home) => {
+		// The Claude counterparts above, for `collectCodexSessions`. Same reasoning:
+		// the symlinked rollout in the inventory test cannot name these branches,
+		// because it fails both operands.
+		const july = path.join(home, ".codex", "sessions", "2026", "07", "24");
+		mkdirSync(july, { recursive: true });
+		writeSession(july, "rollout-2026-07-24T09-09-51-019f9174-fec1-78d2-b4be-91402cdc66d4.jsonl", NOW - 60_000, '{"a":1}\n');
+
+		// A DIRECTORY named like a rollout: counted as a session if `!isFile()`
+		// stops refusing it.
+		mkdirSync(path.join(july, "rollout-2026-07-24T11-00-00-019f9174-fec1-78d2-b4be-91402cdc66d6.jsonl"));
+		// A regular FILE where a day directory belongs: descended into if
+		// `!isDirectory()` stops refusing it, which truncates the walk.
+		writeFileSync(path.join(home, ".codex", "sessions", "2026", "07", "25"), "");
+
+		const codex = adapterFor(inspectAgentAudit(home, {}, NOW), "codex");
+		assert.equal(codex.sessionCount, 1, "a directory named like a rollout is not a session");
+		assert.notEqual(codex.inventory, "partial", "a regular file among the day directories must not truncate the walk");
+	});
+});
+
+test("a regular file where a transcript root belongs is refused as unreadable", () => {
+	withHome((home) => {
+		// A regular file standing in for a transcript root. The two collectors are
+		// ASYMMETRIC here, which is the whole reason this test asserts two different
+		// things, and it was found by reading rather than by the first measurement.
+		//
+		// Codex: `codexDayDirectories` wraps its own walk in a try/catch, so with
+		// `!root.isDirectory()` dropped the ENOTDIR is swallowed and the walk comes
+		// back COLLECTED-but-partial instead of unreadable. The `inventory`
+		// assertion below is what sees that; `health` alone does not, because a
+		// partial walk that found nothing is also "unknown".
+		//
+		// Claude: `collectClaudeSessions` does not wrap, so the ENOTDIR escapes into
+		// `collectTranscriptSessions`'s catch and lands on the SAME
+		// `status: "unreadable"`. No input separates the operands there, so for the
+		// Claude root this asserts the shape is refused, not which line refuses it.
+		mkdirSync(path.join(home, ".claude"), { recursive: true });
+		mkdirSync(path.join(home, ".codex"), { recursive: true });
+		writeFileSync(path.join(home, ".claude", "projects"), "");
+		writeFileSync(path.join(home, ".codex", "sessions"), "");
+
+		const state = inspectAgentAudit(home, {}, NOW);
+		// An unreadable root proves nothing about activity, so it must not be
+		// reported as inactive.
+		assert.equal(adapterFor(state, "claude").health, "unknown");
+		const codex = adapterFor(state, "codex");
+		assert.equal(codex.health, "unknown");
+		// The two collectors are NOT symmetric here, and only this assertion sees
+		// it. `codexDayDirectories` wraps its own walk in a try/catch, so with the
+		// root type test dropped the ENOTDIR is swallowed into a partial COLLECTED
+		// walk instead of an unreadable one. Asserting health alone missed that,
+		// because a partial walk that found nothing is also "unknown".
+		assert.equal(codex.inventory, undefined, "an unreadable root is not a partial walk");
 	});
 });
 

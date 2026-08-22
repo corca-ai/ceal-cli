@@ -1,3 +1,4 @@
+import "../../../test/require-source-lane.ts";
 import { openLeasedConsumerControlSession, runLeasedConsumerControlTransport } from "../dist/leased-consumer-control-session.js";
 import { deferredVoid } from "./deferred-test-support.ts";
 import * as protocol from "@corca-ai/ceal-protocol";

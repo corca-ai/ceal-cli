@@ -1,3 +1,4 @@
+import "../../../test/require-source-lane.ts";
 import {
 	LEASED_CONSUMER_CARRIER_ARGV,
 	type LeasedConsumerCarrierRuntime,

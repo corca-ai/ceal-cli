@@ -240,7 +240,10 @@ function readRepositoryFile(root: string, relativePath: string): Buffer {
 	try {
 		assertNoSymlinkPathComponents(root, target, errorCode);
 		const initial = lstatSync(target);
-		if (!initial.isFile() || initial.isSymbolicLink()) fail(errorCode, "Gateway leased-consumer handoff input is unavailable.");
+		// `lstatSync` does not follow, so a symlink already fails `isFile()` and a
+		// second `|| initial.isSymbolicLink()` operand could never evaluate true.
+		// The symlink refusal that matters here is the `O_NOFOLLOW` open below.
+		if (!initial.isFile()) fail(errorCode, "Gateway leased-consumer handoff input is unavailable.");
 		descriptor = openSync(target, constants.O_RDONLY | constants.O_NOFOLLOW);
 		if (!fstatSync(descriptor).isFile()) fail(errorCode, "Gateway leased-consumer handoff input is unavailable.");
 		return readFileSync(descriptor);

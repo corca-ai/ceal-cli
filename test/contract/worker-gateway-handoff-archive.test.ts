@@ -121,6 +121,27 @@ test("refuses a changed archive or unsafe archive inventory before the input res
 	);
 });
 
+test("a directory standing where the handoff archive belongs is refused", (context: TestContext) => {
+	// The DISCRIMINATING case for `requireRegularFile`'s `!stat.isFile()`. A
+	// symlink cannot name that branch, because `lstatSync` does not follow, so a
+	// symlink fails `isFile()` too -- which is exactly why the
+	// `|| stat.isSymbolicLink()` operand that used to sit beside it could never
+	// evaluate true. A directory is not a symlink, so `!stat.isFile()` is the only
+	// operand that can refuse it. Measured: with that operand dropped, the suite
+	// stayed green and this branch had no test at all.
+	const fixture = archiveFixture(context);
+	const directoryArchive = path.join(fixture.repoRoot, "handoff-archive-directory");
+	mkdirSync(directoryArchive, { recursive: true });
+	assert.throws(
+		() =>
+			consumeLockedGatewayHandoffArchiveSync(
+				{ repoRoot: fixture.repoRoot, archiveFile: directoryArchive },
+				{ resolveInputs: () => assert.fail("a directory must not reach the input resolver") },
+			),
+		hasArchiveCode("invalid_gateway_handoff_archive"),
+	);
+});
+
 // The client tarball used to be the fifth member and the reason the lock had to
 // declare a package pair. It is packed from this repository's own source now, so
 // a packet that still carries one is not a Gateway protocol handoff — and a

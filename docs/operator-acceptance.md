@@ -93,10 +93,11 @@ access has no substitute and no fallback path:
   `--force` is the only path that replaces one. That turns a silent loss into a
   deliberate one; it does not give the prod binding back.
 
-The route in: ask the Gateway lane operator directly. The worker repository
-records the open release-blocking Protocol state in
-`docs/protocol-quarantine.md`; do not copy internal correspondence into this
-repository.
+The route in: ask the Gateway lane operator directly. A Protocol handoff is the
+other thing only that lane can produce — `gateway-protocol-handoff-lock.json`
+records which signed archive this repository consumes, and a successor arrives
+through `npm run bootstrap:gateway-handoff`, never through correspondence copied
+into this repository.
 
 ## Before Spending A Release Tag
 
@@ -119,23 +120,26 @@ canonical maintainer tag push selects the release, and the workflow binds the
 commit and assembled inventory automatically to that same run; no release-time
 Environment variable update is required.
 
-The proof/ship state no longer needs a separate look to avoid a wasted tag: it is
-a gate failure. A green `npm run check` already means the protocol bytes this
-repository tests against are the bytes a release would ship from the locked
-handoff archive. To read it directly, offline and with no Gateway session:
+The proof/ship state no longer needs a separate look to avoid a wasted tag, and
+no longer needs a separate concept either. The protocol bytes this repository
+tests against are the archive a release ships, so a green `npm run check` has
+already said so — `npm run lint:protocol-artifact` is inside both gates. To read
+it directly, offline and with no Gateway session:
 
 ```sh
-node scripts/verify-protocol-vendor-pin.ts   # exit 0 only when shippable
+npm run lint:protocol-artifact   # exit 0 only when shippable
 ```
 
-A non-zero exit with `proof_shipment_protocol_divergence` names the vendored
-copy's Gateway commit and the one the lock binds, and it blocks the release,
-packing, and acceptance-packet paths independently of whether any test ran. While
-it is failing, `npm run check:protocol-dev` still verifies the development
-vendor identity and exercises the client suite — its output is stamped
-`proof_level: development_only` and must
-not be cited as release or installed-worker evidence. `docs/gates.md` says what
-the check does and does not cover.
+A non-zero exit is `vendored_artifact_missing` or `vendored_artifact_mismatch`
+when `vendor/ceal-protocol/` does not hold the exact archive the lock binds, or
+`invalid_gateway_handoff_lock` when the lock cannot say what to check against.
+Any of them blocks the release, packing, and acceptance-packet paths
+independently of whether any test ran. Re-acquire the archive with
+`npm run bootstrap:gateway-handoff -- --tag <tag>` rather than editing either
+file. `npm run check:protocol-dev` runs the same check plus the client suite; its
+`--development` flag selects nothing weaker and its output says so, and neither
+command is release or installed-worker evidence. `docs/gates.md` says what the
+check does and does not cover.
 
 Signing is keyless, but publishing is privileged. The `sign-and-publish` and
 rollback activation jobs use the `ceal-cli-release` Environment for their

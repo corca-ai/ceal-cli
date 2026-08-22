@@ -2,7 +2,7 @@
 
 import { isGitObject } from "./lib/git-object.ts";
 import { execFileSync,type ExecFileSyncOptions } from "node:child_process";
-import { existsSync, lstatSync, mkdirSync, mkdtempSync, readdirSync, renameSync, rmSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readdirSync, renameSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -82,7 +82,12 @@ export function materializeSignedGatewayProtocolSource(
 function assertRegularTree(root: string): void {
 	for (const entry of readdirSync(root, { withFileTypes: true })) {
 		const target = path.join(root, entry.name);
-		if (entry.isSymbolicLink() || (!entry.isDirectory() && !entry.isFile()) || lstatSync(target).isSymbolicLink())
+		// A `Dirent` from `readdirSync(..., { withFileTypes: true })` reports the
+		// entry's own type without following, so `entry.isSymbolicLink()` is the
+		// live symlink refusal. A trailing third operand re-`lstat`ed the same path
+		// to ask the same question: it could only be true when the FIRST operand
+		// was already true, so it never decided anything and cost a stat per entry.
+		if (entry.isSymbolicLink() || (!entry.isDirectory() && !entry.isFile()))
 			throw new Error("signed_protocol_source_inventory_unsafe");
 		if (entry.isDirectory()) assertRegularTree(target);
 	}

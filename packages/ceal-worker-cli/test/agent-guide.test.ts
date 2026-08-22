@@ -1,3 +1,4 @@
+import "../../../test/require-source-lane.ts";
 import { createSkillDirectoryBundle } from "../../../scripts/lib/skill-directory-bundle.ts";
 import { required as requiredValue } from "../../../test/required.ts";
 import {

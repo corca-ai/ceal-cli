@@ -1,4 +1,5 @@
 /* global process */
+import "../../../test/require-source-lane.ts";
 import { runBoundedProcess } from "../dist/bounded-process.js";
 import assert from "node:assert/strict";
 import { chmodSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";

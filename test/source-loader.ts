@@ -1,4 +1,5 @@
 import { resolveWorkspaceSourceAuthority, WORKSPACE_PACKAGE_DIRECTORIES } from "../scripts/lib/workspace-source-authority.ts";
+import { markSourceLane } from "./source-lane.ts";
 import { transformSync } from "esbuild";
 import { existsSync, readFileSync, realpathSync } from "node:fs";
 import { type LoadHookSync, registerHooks,type ResolveHookSync } from "node:module";
@@ -8,7 +9,6 @@ import { fileURLToPath, pathToFileURL } from "node:url";
 const DEFAULT_REPO_ROOT = resolvePath(dirname(fileURLToPath(import.meta.url)), "..");
 const REPO_ROOT = resolvePath(process.env.CEAL_SOURCE_TEST_REPO_ROOT ?? DEFAULT_REPO_ROOT);
 const PACKAGES = new Map([
-	["@corca-ai/ceal-protocol", "ceal-protocol"],
 	["@corca-ai/ceal", "ceal-client"],
 	["@corca-ai/ceal-worker-cli", "ceal-worker-cli"],
 ]);
@@ -94,3 +94,8 @@ const loadSourceTest: LoadHookSync = (url, context, nextLoad) => {
 };
 
 registerHooks({ resolve: resolveSourceTest, load: loadSourceTest });
+
+// Announce the lane to the suites that require it. This is set here rather than
+// in `run-source-tests.ts` because the two packages enter the lane differently
+// and only this module is common to both. See `test/source-lane.ts`.
+markSourceLane();

@@ -1,3 +1,4 @@
+import "../../../test/require-source-lane.ts";
 import { required as requiredValue,requiredCapture } from "../../../test/required.ts";
 import {
 	buildAcceptanceRecord,

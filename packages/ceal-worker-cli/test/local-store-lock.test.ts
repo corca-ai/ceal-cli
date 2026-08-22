@@ -1,3 +1,4 @@
+import "../../../test/require-source-lane.ts";
 import { resolveAnchoredDirectory } from "../dist/local-store-anchor.js";
 import { withLocalStoreLock } from "../dist/local-store-lock.js";
 import type { LocalStoreLockOptions } from "../src/local-store-lock.js";
@@ -267,6 +268,56 @@ test("a lock directory or owner record readable beyond its owner is refused", as
 			withLocalStoreLock(options(directory), async () => {}),
 			TestUnsafe,
 		);
+	});
+});
+
+test("an owner record that is a directory rather than a file is refused", async () => {
+	await withStore(async (directory) => {
+		const lockPath = options(directory).lockPath;
+		mkdirSync(lockPath, { mode: 0o700 });
+		// The DISCRIMINATING case for `!owner.isFile()`. A directory-shaped owner
+		// record is not a symlink, so the `|| owner.isSymbolicLink()` operand that
+		// used to sit here could not have refused it -- and under `lstatSync` that
+		// operand could never fire at all, because a symlink fails `isFile()` first.
+		//
+		// Two details are load-bearing. The mode is 0o700 so the permission operand
+		// cannot fire and mask the one under test. And the lock is aged past the
+		// initialization grace: left fresh, an unreadable owner record is classified
+		// `initializing` and the acquire refuses as BUSY, which is a different
+		// branch.
+		//
+		// Measured, but only after a correction worth recording: this suite loads
+		// `../dist/local-store-lock.js`, so a mutation of `src` proves nothing until
+		// `npm run build` has run. Two earlier runs reported this test as
+		// non-discriminating; both were executing three-day-old `dist` and were
+		// void. With the build in the loop, dropping `!owner.isFile()` turns this
+		// red.
+		mkdirSync(path.join(lockPath, "owner.json"), { mode: 0o700 });
+		const old = new Date(Date.now() - 60_000);
+		utimesSync(lockPath, old, old);
+		await assert.rejects(
+			withLocalStoreLock(options(directory), async () => {}),
+			TestUnsafe,
+		);
+	});
+});
+
+test("a regular file where the lock directory belongs is refused", async () => {
+	await withStore(async (directory) => {
+		const lockPath = options(directory).lockPath;
+		// A regular file where the lock directory belongs, which nothing covered.
+		// The mode is 0o700 on purpose: at anything wider the `(lock.mode & 0o077)`
+		// operand would be what refuses, and the type test would still have no test
+		// naming it.
+		//
+		// It does NOT discriminate `!lock.isDirectory()`, and that is measured: with
+		// the operand dropped, every path under a regular file raises ENOTDIR and
+		// the store fails closed to the same refusal. The type test is an early exit
+		// in front of an identical outcome. Asserted here is that the shape is
+		// refused, not which line refuses it.
+		writeFileSync(lockPath, "", { mode: 0o700 });
+		fs.chmodSync(lockPath, 0o700);
+		await assert.rejects(withLocalStoreLock(options(directory), async () => {}), TestUnsafe);
 	});
 });
 

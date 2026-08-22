@@ -1,3 +1,4 @@
+import "../../../test/require-source-lane.ts";
 import { required as requiredValue } from "../../../test/required.ts";
 import { CealPersonalClientSessionError, createCealPersonalClientSessionClient } from "../src/index.ts";
 import type { JsonRecord } from "./client-response-test-support.ts";

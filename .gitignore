@@ -3,6 +3,11 @@ node_modules/
 packages/*/dist/
 dist/
 *.tgz
+# ...except a VENDORED one. `*.tgz` is here for `npm pack` output, and a
+# slash-free pattern matches at any depth, so without this negation the signed
+# Protocol archive the repository now consumes is invisible to Git: a clone gets
+# no Protocol at all and `npm ci` dies on the `file:` path before any gate runs.
+!vendor/**/*.tgz
 .ceal-public-source-seed.json
 candidate-source-inventory.json
 

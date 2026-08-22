@@ -555,7 +555,11 @@ function ensureGuideOwnershipMarker(ownership: string, digest: string): void {
 		// marker is acceptable only when it is the exact Ceal-owned statement.
 	}
 	const stat = lstatSync(marker);
-	if (stat.isSymbolicLink() || !stat.isFile() || permissionMode(stat) !== 0o600 || readFileSync(marker, "utf8") !== expected)
+	// The redundant `stat.isSymbolicLink()` operand is gone from this guard and the
+	// two below it: under `lstatSync` a symlink already fails `isFile()` /
+	// `isDirectory()`. The mode tests are permission and setuid bits, not S_IFMT,
+	// so they do not revive it.
+	if (!stat.isFile() || permissionMode(stat) !== 0o600 || readFileSync(marker, "utf8") !== expected)
 		throw new Error("unsafe_guide_state");
 }
 
@@ -571,12 +575,12 @@ function pathEntryExists(path: string): boolean {
 function ensureRegularDirectory(path: string): void {
 	if (!existsSync(path)) mkdirSync(path, { recursive: true, mode: 0o700 });
 	const stat = lstatSync(path);
-	if (!stat.isDirectory() || stat.isSymbolicLink() || (stat.mode & 0o7022) !== 0) throw new Error("unsafe_guide_state");
+	if (!stat.isDirectory() || (stat.mode & 0o7022) !== 0) throw new Error("unsafe_guide_state");
 }
 
 function verifyMaterializedGuide(root: string, bundle: CealGuideBundle): void {
 	const rootStat = lstatSync(root);
-	if (!rootStat.isDirectory() || rootStat.isSymbolicLink() || permissionMode(rootStat) !== 0o700) throw new Error("unsafe_guide_state");
+	if (!rootStat.isDirectory() || permissionMode(rootStat) !== 0o700) throw new Error("unsafe_guide_state");
 	const expected = new Map(bundle.files.map((file) => [file.path, file]));
 	const observed: string[] = [];
 	const visit = (directory: string, prefix: string): void => {
@@ -614,9 +618,7 @@ function registrationPointsIntoEmbeddedState(registrationPath: string, stateRoot
 		const markerStat = lstatSync(marker);
 		return (
 			targetStat.isDirectory() &&
-			!targetStat.isSymbolicLink() &&
 			markerStat.isFile() &&
-			!markerStat.isSymbolicLink() &&
 			permissionMode(markerStat) === 0o600 &&
 			readFileSync(marker, "utf8") === `ceal.worker_guide_materialization.v1 ${digest}\n`
 		);

@@ -244,7 +244,10 @@ function assertQuarantine(options: LocalStoreLockOptions, quarantine: () => stri
 	} catch {
 		options.onUnsafe();
 	}
-	if (!stat.isDirectory() || stat.isSymbolicLink() || (stat.mode & 0o077) !== 0) options.onUnsafe();
+	// Redundant `stat.isSymbolicLink()` dropped, as at `staleLockOwner` below: a
+	// symlink already fails `isDirectory()` under `lstatSync`, and the mode test is
+	// permission bits rather than S_IFMT.
+	if (!stat.isDirectory() || (stat.mode & 0o077) !== 0) options.onUnsafe();
 	if ("nonce" in owner) {
 		const quarantinedOwner = readLockOwner(quarantine);
 		if (!quarantinedOwner || quarantinedOwner.pid !== owner.pid || quarantinedOwner.nonce !== owner.nonce) options.onUnsafe();
@@ -272,7 +275,10 @@ function staleLockOwner(
 	} catch {
 		return Date.now() - lock.mtimeMs < LOCK_INITIALIZATION_GRACE_MS ? "initializing" : { invalidGeneration: lockGeneration(lock) };
 	}
-	if (!owner.isFile() || owner.isSymbolicLink() || (owner.mode & 0o077) !== 0) options.onUnsafe();
+	// `lstatSync` does not follow, so a symlink already fails `isFile()`; the
+	// `|| owner.isSymbolicLink()` operand that stood here could never evaluate
+	// true. The mode test is permission bits, not S_IFMT, so it does not revive it.
+	if (!owner.isFile() || (owner.mode & 0o077) !== 0) options.onUnsafe();
 	// An owner record with the right shape and the right mode but unreadable
 	// content is a holder that died between creating the file and writing it —
 	// the same abandonment as a missing owner file, and reclaimable on the same
@@ -301,7 +307,7 @@ function readSafeLockDirectory(options: LocalStoreLockOptions): Stats | null {
 		if (nodeErrorCode(error) === "ENOENT") return null;
 		options.onUnsafe();
 	}
-	if (!lock.isDirectory() || lock.isSymbolicLink() || (lock.mode & 0o077) !== 0) options.onUnsafe();
+	if (!lock.isDirectory() || (lock.mode & 0o077) !== 0) options.onUnsafe();
 	return lock;
 }
 

@@ -17,7 +17,6 @@
 		"skipLibCheck": true,
 		"allowImportingTsExtensions": true,
 		"paths": {
-			"@corca-ai/ceal-protocol": ["./packages/ceal-protocol/src/index.ts"],
 			"@corca-ai/ceal": ["./packages/ceal-client/src/index.ts"]
 		},
 		"noEmit": true,

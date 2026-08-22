@@ -22,16 +22,18 @@ Two different defects, and coverage sees only one:
 | production-unreachable | **no** — reads covered | no — counts a test as a caller | `npm run lint:reachability` (slice 4) |
 
 So slice 1 is worth having and is not the audit. The second row had no standing
-signal when this was written; slice 4 built one, and proved it by rerunning it
-over the tree that held the two guards slice 2 found by hand.
+signal when this was written; slice 4 built one, and proved it once by rerunning
+it over the tree that held the two guards slice 2 found by hand — a proof the
+`.mjs`-to-`.ts` migration could not carry forward, for the reason slice 4 records.
 
 ## Acceptance
 
 **Deleting any guard call must turn something red.** That is the whole goal in one
-sentence, and it is testable *in a test* — `worker-release-inputs.test.ts` does it
-for the protocol pin by reaching the guard, not by deleting one for real, and the
-same shape works for the rest. A slice that ends with a
-guard still only pinned by a regex has not finished.
+sentence, and it is testable *in a test* — `test/contract/worker-release-inputs.test.ts`
+does it for the Protocol artifact guard by reaching it with a scratch checkout the
+guard cannot satisfy, not by deleting a call for real, and the same shape works for
+the rest. A slice that ends with a guard still only pinned by a regex has not
+finished.
 
 ## Slice 1 — cover `scripts/` — done
 
@@ -73,8 +75,8 @@ neither was ever wired. Recorded here because the reasoning generalises:
   `consume` dependency. Its twelve tests exercised the unused wrapper while the
   consumed path went unproven; they call the sync variant now.
 
-Next by measurement, both branch coverage: `build-worker-release-assets.mjs` at
-66.44% and `verify-gateway-protocol-consumer.mjs` at 60.24%. (gates.md quotes the
+Next by measurement, both branch coverage: `build-worker-release-assets.ts` at
+66.44% and `verify-gateway-protocol-consumer.ts` at 60.24%. (gates.md quotes the
 latter's *statements* figure for a different purpose; do not read them as one.)
 
 **A zero is a question, not a verdict.** Two of the three on this report are not
@@ -97,15 +99,16 @@ runner is still the development-machine measurement quoted below.
 
 ### A. `linux-arm64` is signed without `npm run check` — resolved
 
-`ceal-release.yml:65` sets `validate_source: "0"` for that leg alone and `:118`
+`ceal-release.yml:72` sets `validate_source: "0"` for that leg alone and `:145`
 gates the whole gate on it. The leg still gets `tsc`, the SEA build, the native
-smoke and the pin guard through compose. What it does not get is `test:release`,
+smoke, and the vendored-artifact guard that compose reaches through the native
+builder's `withWorkerReleaseInputsAsync`. What it does not get is `test:release`,
 so **`verifyGatewayProtocolConsumer` never runs against the bytes signed on that
 platform** — the only proof that npm's resolver binds the packed Gateway tarball
 rather than the workspace symlink npm creates during development. Those two are
 indistinguishable from a passing build, which is why the proof exists.
 
-The workflow comment at `:106-116` states the tradeoff and its argument is "the
+The workflow comment at `:116-120` states the tradeoff and its argument is "the
 source is identical on all three legs". That is true and beside the point: this
 proof is not about the source, it is about **npm's resolution on that runner**.
 The 2026-08-08 lockfile incident is the same axis — npm recorded only the
@@ -120,7 +123,7 @@ so the tier buys the missing proof on arm64 rather than skipping itself.
 | option | buys | costs |
 | --- | --- | --- |
 | leave it | nothing | the signed arm64 binary is permanently unproven on this axis |
-| **add `test:release` to that leg** | exactly the missing proof | ~1 min, **and the prewarm step at `:92` must be enabled for the leg too** or the packed-consumer proofs fail as `ENOTCACHED` |
+| **add `test:release` to that leg** | exactly the missing proof | ~1 min, **and the prewarm step at `:102` must be enabled for the leg too** or the packed-consumer proofs fail as `ENOTCACHED` |
 | full `npm run check` on all three | the above | also re-proves lint/unit/contract, which are architecture-independent — the waste the comment already argues against |
 | record an explicit non-claim | honesty | the hole stays |
 
@@ -129,24 +132,33 @@ one more way a release tag can burn, and **a failed release tag cannot be
 reused**. That minute was measured on a development machine, not a
 `ubuntu-24.04-arm` runner.
 
-### B. Nothing re-asserts the pin before the artifact is signed — resolved
+### B. Nothing re-asserts the Protocol identity before the artifact is signed — resolved
 
-The pin was asserted inside `withWorkerReleaseInputs*`
-(`scripts/worker-release-inputs.ts:67`) while each platform built. Afterwards
-nothing asked again: `sign-and-publish`'s inventory verification
-(`ceal-release.yml:263-277`) checked digests, the exact file list, and that each
+The vendored-artifact guard was asserted inside `withWorkerReleaseInputs*`
+(`scripts/worker-release-inputs.ts:347` and `:355`) while each platform built.
+Afterwards nothing asked again: `sign-and-publish`'s inventory verification
+(`ceal-release.yml:338-355`) checked digests, the exact file list, and that each
 manifest carried the right `version` and `platform` — bytes and shape, never
 `protocol.producer`.
 
+That is a second question, and it stays a real one even though the archive
+binding made proof/ship divergence unreachable. `lint:protocol-artifact` proves
+the bytes in `vendor/` are the ones `gateway-protocol-handoff-lock.json` names on
+the tree the guard runs against; it says nothing about whether the manifest a
+*signed asset set* carries names the same producer. Digest equality and
+provenance agreement are different facts, and only one of them survives being
+merged across three platform legs.
+
 **The comparison already existed and failed closed.** The manifest recorded the
 protocol producer's `repository`, `commit` and `tree`, and
-`verifyProtocolProvenance` (`scripts/worker-acceptance-packet.ts:136`) compared
-them against the lock, failing `protocol_provenance_disagreement` at `:162`.
+`verifyProtocolProvenance` (`scripts/worker-acceptance-packet.ts:380`) compared
+them against the handoff lock's `gateway.commit` and `gateway.tree`, failing
+`protocol_provenance_disagreement`.
 The acceptance-packet fixture carries a real one. So this was wiring, not design. The then-open missing-client-package hole was separate; the
 current merge now validates exact client provenance beside the Protocol check.
 
 But the catch then was late rather than absent: the only production caller was
-`buildAcceptancePacket` (`:205`), an operator command run against an *installed*
+`buildAcceptancePacket` (`:452`), an operator command run against an *installed*
 release. The defect would have surfaced after signing and publishing, and **a failed
 release tag cannot be reused**.
 
@@ -169,12 +181,16 @@ signing identity and the origin credentials. Two notes for whoever does it:
 
 ## Explicitly not in this goal
 
-**Re-asserting the pin at rollback.** `ceal-worker-stable-rollback.yml` re-verifies
-signatures and moves the pointer without asking about the pin, and that stays out
-of this goal deliberately. The correct pin there is the one the rolled-back
-release shipped with, not the lock on the branch the lane checks out, so the
-guard that fits B would fail a correct rollback. Settle "which lock" before
-anyone treats this as B's second half.
+**Re-asserting the Protocol identity at rollback.**
+`ceal-worker-stable-rollback.yml` re-verifies cosign signatures and rotates the
+stable pointer without ever asking which Protocol archive the release it restores
+was built from, and that stays out of this goal deliberately. The correct binding
+there is the one the rolled-back release shipped with, not the
+`gateway-protocol-handoff-lock.json` on the branch the lane checks out, so the
+guard that fits B would fail a correct rollback. Consuming a signed archive rather
+than a source copy does not dissolve that: the archive identity is a property of
+the release being restored, and the current tree cannot be asked for it. Settle
+"which lock" before anyone treats this as B's second half.
 
 The signed manifest's missing client identity was out of this goal because it
 required its own manifest-schema change. That later landed in the merge path;
@@ -216,7 +232,7 @@ distribution is the finding: only one of six was dead code.
   and the reason is the trap this goal keeps meeting. Its four would-be call
   sites write the schema as a literal on purpose, because the gate proving every
   declared result schema is actually emitted scans the source text for
-  `schema_version: "..."` (`packages/ceal-worker-cli/test/cli.test.ts:338`).
+  `schema_version: "..."` (`packages/ceal-worker-cli/test/cli.test.ts:503`).
   Routing them through the constant would pass `tsc` and turn that gate vacuous.
   A constant no emitter may use is not a constant.
 - **Two were wired into the real path**, and each was a live defect rather than
@@ -233,7 +249,8 @@ distribution is the finding: only one of six was dead code.
     build's `embedded_control_session_contract_drift` check reads the source file
     as *text*, so it said nothing about the pair this module loaded. It verifies
     now, and the guard is falsifiable — deleting the comparison turns
-    `test/leased-consumer-control-session.test.mjs` red, confirmed by doing it.
+    `packages/ceal-worker-cli/test/leased-consumer-control-session.test.ts` red,
+    confirmed by doing it.
 
 Wiring one of them did **not** clear it from `knip`'s list, and that is the
 measurement to keep: `CEAL_AGENT_HOST_ENVIRONMENT_VARIABLES`' new consumer is a
@@ -248,7 +265,7 @@ reporting it because entry-file exports are never reported. Neither fact makes
 gap this section first assumed — there are two mechanisms, and each alone would
 have hidden both guards slice 2 deleted:
 
-- the top-level `scripts/*.mjs` are `entry` files, and `knip` reports no export
+- the top-level `scripts/*.ts` are `entry` files, and `knip` reports no export
   in an entry file;
 - under `scripts/lib/` it does report one, until a test imports it — and those
   suites import `scripts/` directly, with no build step between the test consumer
@@ -256,11 +273,11 @@ have hidden both guards slice 2 deleted:
 
 Excluding tests from `entry` to force the question turns every test file into an
 "unused file", which trades one blind spot for a page of noise. Undeclaring the
-entries would report every `scripts/*.mjs` as an unused file instead.
+entries would report every `scripts/*.ts` as an unused file instead.
 
 **The check exists — `npm run lint:reachability`**, in both gates and in
 `test/contract/production-reachability.test.ts`. It walks the production graph
-only: entries are the `node scripts/*.mjs` invocations declared in the manifest,
+only: entries are the `node scripts/*.ts` invocations declared in the manifest,
 in the lanes, and in the hook; edges are static relative imports; and a release
 lane's inline `node --input-type=module` step counts as a caller. Tests are not
 in the graph, which is the whole mechanism — a guard only its own suite calls is
@@ -269,12 +286,26 @@ and an export no production path reaches that its own module never calls either.
 The second condition is what keeps it out of `knip`'s territory; a surplus
 `export` modifier is not this check's business.
 
-**It was proven against the tree that held the defect, not against an imitation
-of it.** Run today's analyzer over `0cce9f9^`, reconstructed with `git archive`,
-and it names `assertWorkerReleaseSourcePath` and
-`resolveLockedGatewayHandoffArchive` — the two guards slice 2 found by hand after
-coverage and `knip` both read them as fine. That assertion is in the suite, and
-it skips loudly rather than passing on a clone without the commit.
+**It was proven once against the tree that held the defect, not against an
+imitation of it.** The analyzer was run over `0cce9f9^` — the parent of the commit
+that deleted them — reconstructed with `git archive`, and it named
+`assertWorkerReleaseSourcePath` and `resolveLockedGatewayHandoffArchive`, the two
+guards slice 2 found by hand after coverage and `knip` both read them as fine.
+
+**That assertion is no longer in the suite, and the reason is worth stating rather
+than quietly dropping.** The reconstructed tree was JavaScript; the module census
+now collects only `.ts`
+(`scripts/lib/production-reachability.ts:280`), so today's analyzer would walk
+`0cce9f9^` and find nothing to report — not the two guards, and not anything else.
+Keeping the case would have meant carrying a second file shape for one historical
+commit, which is a migration-only dependency rather than a retained proof, so it
+was deleted with the rest of the `.mjs` scaffolding.
+`test/contract/production-reachability.test.ts` carries the weight differently
+now: fixtures whose answer is known before the analyzer runs, then the current
+repository, with a non-vacuous entry/module census asserted so a zero cannot mean
+"the walk found nothing to look at". Read that as the weaker claim it is. The
+fixtures prove what the analyzer *can* see; the reconstruction proved it saw a
+defect nobody had designed it around, and no fixture can prove that about itself.
 
 Its first run also produced one false positive and one real finding, and both are
 worth inheriting:
@@ -282,7 +313,7 @@ worth inheriting:
 - `parsePublishedWorkerReleaseInventory` read as unreached because the rollback
   lane calls it from an inline workflow script. A check that is wrong on its first
   run is a check that gets switched off, so workflow steps are in the graph now.
-- `verify-gateway-protocol-consumer.mjs` was reached by no entry at all: README
+- `verify-gateway-protocol-consumer.ts` was reached by no entry at all: README
   told operators to run it and the manifest never declared it. It has an npm
   script now, and README points at that.
 

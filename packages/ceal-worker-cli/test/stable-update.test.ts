@@ -1,5 +1,7 @@
 /* global process */
+import "../../../test/require-source-lane.ts";
 import type { CealStableUpdateProgressStage, CealWorkerPlatform } from "../dist/cli-runtime.js";
+import { resolveInstalledWorkerRelease } from "../dist/managed-worker-install.js";
 import { sha256 } from "../dist/sha256.js";
 import type { CealStableUpdateDeadlines } from "../dist/stable-update.js";
 import { createCealStableUpdateRunner } from "../dist/stable-update.js";
@@ -12,6 +14,7 @@ import {
 	mkdtempSync,
 	readFileSync,
 	readlinkSync,
+	realpathSync,
 	renameSync,
 	rmSync,
 	symlinkSync,
@@ -292,6 +295,35 @@ test("the update process exits once it has its answer", { timeout: DEADLINE_TEST
 
 // Short kill clocks as well as short deadlines: the real ones are seconds, and a
 // test that waited them out five times over would not stay in the iteration gate.
+test("a managed install whose installer is a directory is refused", (context: TestContext) => {
+	// Covers `findVerifiedInstaller`'s `!stat.isFile()`, the last of the eleven
+	// dead-operand sites to get any test at all -- its removal previously rested on
+	// the typechecker and review alone.
+	//
+	// A directory is the input that reaches the branch: `lstatSync` does not
+	// follow, so a symlink fails `isFile()` too, which is exactly why the
+	// `|| stat.isSymbolicLink()` operand removed from beside it could never
+	// evaluate true. The inventory is left naming the original digest, so the
+	// generation identity still resolves and the failure is the installer's.
+	//
+	// This does NOT discriminate `!stat.isFile()`, and that is measured rather
+	// than assumed: dropping the operand leaves this green, because the
+	// `readFileSync(file)` two lines below then throws EISDIR and the enclosing
+	// `try { … } catch { return []; }` swallows it into the same empty result. The
+	// operand is an early exit, not the only refusal. So this asserts that a
+	// directory-shaped installer is refused, not which line refuses it.
+	//
+	// This lives beside the stable-update fixtures because `installedGeneration`
+	// is what builds a topology `resolveInstalledWorkerRelease` will accept.
+	const root = scratch(context, "ceal-managed-install-directory-installer-");
+	const command = installedGeneration(root, "exit 0\n");
+	const generation = path.dirname(realpathSync(command));
+	const installer = path.join(generation, "install.sh");
+	rmSync(installer);
+	mkdirSync(installer, { recursive: true });
+	assert.throws(() => resolveInstalledWorkerRelease(command), /installer_digest_mismatch/u);
+});
+
 function deadlines(overrides: Partial<CealStableUpdateDeadlines>): CealStableUpdateDeadlines {
 	return {
 		versionReadbackMs: 30_000,

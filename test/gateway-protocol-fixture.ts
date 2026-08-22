@@ -1,10 +1,8 @@
 import { sha256 } from "../packages/ceal-worker-cli/src/sha256.ts";
-import { parseNpmPackMetadata } from "../scripts/lib/npm-pack-metadata.ts";
-import { toolchainEnv } from "../scripts/lib/toolchain-env.ts";
-import { withBuiltPackages } from "./repo-build.ts";
 import assert from "node:assert/strict";
-import { spawnSync } from "node:child_process";
-import { cpSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, writeFileSync } from "node:fs";
+import { execFileSync } from "node:child_process";
+import { createHash } from "node:crypto";
+import { copyFileSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -16,31 +14,22 @@ export const REPO_ROOT = path.resolve(fileURLToPath(new URL("..", import.meta.ur
 
 export function makeGatewayProtocolFixture() {
 	const root = realpathSync(mkdtempSync(path.join(tmpdir(), "ceal-gateway-protocol-consumer-test-")));
-	const source = path.join(root, "protocol");
 	const output = path.join(root, "artifacts");
 	mkdirSync(output, { recursive: true, mode: 0o755 });
-	// The copy reads the shared workspace `dist`, so it happens inside one hold of
-	// the lock that also owns building it — see `test/repo-build.ts`. Everything
-	// after this point works on the private copy under `root` and needs no lock.
-	withBuiltPackages(["packages/ceal-protocol"], () => {
-		cpSync(path.join(REPO_ROOT, "packages", "ceal-protocol"), source, {
-			recursive: true,
-			filter: (entry) => path.basename(entry) !== "node_modules",
-		});
-	});
-	const manifestPath = path.join(source, "package.json");
-	const manifest = JSON.parse(readFileSync(manifestPath, "utf8"));
-	manifest.repository = { type: "git", url: "git+https://github.com/corca-ai/ceal.git", directory: "packages/ceal-protocol" };
-	manifest.homepage = "https://github.com/corca-ai/ceal#readme";
-	manifest.bugs = "https://github.com/corca-ai/ceal/issues";
-	writeFileSync(manifestPath, `${JSON.stringify(manifest, null, "\t")}\n`);
-	const packed = spawnSync("npm", ["pack", source, "--ignore-scripts", "--json", "--pack-destination", output], {
-		encoding: "utf8",
-		env: toolchainEnv(),
-	});
-	assert.equal(packed.status, 0, packed.stderr);
-	const metadata = parseNpmPackMetadata(JSON.parse(packed.stdout));
-	const tarball = path.join(output, metadata.filename);
+	// The consumer proof is about an archive this repository RECEIVES, so the fixture
+	// uses the received archive rather than building and packing a local source tree
+	// that resembles one. That tree is gone, and with it the workspace build lock and
+	// the `npm pack` this used to need: the Protocol arrives already packed and
+	// already signed, and `vendor/ceal-protocol` is where it lands.
+	const lock = JSON.parse(readFileSync(path.join(REPO_ROOT, "gateway-protocol-handoff-lock.json"), "utf8"));
+	const tarball = path.join(output, lock.protocol.filename);
+	copyFileSync(path.join(REPO_ROOT, "vendor", "ceal-protocol", lock.protocol.filename), tarball);
+	const bytes = readFileSync(tarball);
+	// Read back out of the archive, so every field below describes the bytes on disk
+	// rather than a manifest the fixture could have edited first.
+	const manifest = JSON.parse(execFileSync("tar", ["-xOzf", tarball, "package/package.json"]).toString("utf8"));
+	const digest = sha256(bytes);
+	assert.equal(digest, lock.protocol.sha256, "the vendored archive must be the one the handoff lock binds");
 	const proof = {
 		schema_version: "ceal.gateway_protocol_artifact.v1",
 		proof_level: "local_state",
@@ -49,10 +38,10 @@ export function makeGatewayProtocolFixture() {
 		artifact: {
 			package: "@corca-ai/ceal-protocol",
 			version: manifest.version,
-			filename: metadata.filename,
-			sha256: sha256(readFileSync(tarball)),
-			npm_integrity: metadata.integrity,
-			npm_shasum: metadata.shasum,
+			filename: lock.protocol.filename,
+			sha256: digest,
+			npm_integrity: `sha512-${createHash("sha512").update(bytes).digest("base64")}`,
+			npm_shasum: createHash("sha1").update(bytes).digest("hex"),
 			exports: Object.keys(manifest.exports).sort(),
 		},
 	};

@@ -645,7 +645,12 @@ function collectClaudeSessions(projects: string, monotonicNow: () => number): { 
 	const sessions: CollectedSession[] = [];
 	const walk = createWalkBudget(monotonicNow);
 	const root = lstatSync(projects);
-	if (root.isSymbolicLink() || !root.isDirectory()) throw new Error("unsafe_root");
+	// Six guards in this file carried a redundant `stat.isSymbolicLink()` operand.
+	// `lstatSync` does not follow, so a symlink reports `isDirectory()` and
+	// `isFile()` as false and the type test alone refuses it. Here the redundant
+	// operand was written FIRST, so it was the one that fired -- but never the one
+	// that decided, because removing it changes no outcome.
+	if (!root.isDirectory()) throw new Error("unsafe_root");
 	for (const project of readBoundedDirectoryNames(projects, walk, "ascending")) {
 		if (walkBudgetReached(walk)) break;
 		walk.examined += 1;
@@ -657,7 +662,7 @@ function collectClaudeSessions(projects: string, monotonicNow: () => number): { 
 			walk.partial = true;
 			continue;
 		}
-		if (projectStat.isSymbolicLink() || !projectStat.isDirectory()) continue;
+		if (!projectStat.isDirectory()) continue;
 		try {
 			for (const file of readBoundedDirectoryNames(projectDirectory, walk, "ascending")) {
 				if (walkBudgetReached(walk)) break;
@@ -671,7 +676,7 @@ function collectClaudeSessions(projects: string, monotonicNow: () => number): { 
 					walk.partial = true;
 					continue;
 				}
-				if (stat.isSymbolicLink() || !stat.isFile()) continue;
+				if (!stat.isFile()) continue;
 				sessions.push({
 					sessionRef: file.slice(0, -".jsonl".length),
 					lastActivityAt: stat.mtimeMs,
@@ -697,7 +702,7 @@ function collectCodexSessions(sessionsRoot: string, monotonicNow: () => number):
 	const sessions: CollectedSession[] = [];
 	const walk = createWalkBudget(monotonicNow);
 	const root = lstatSync(sessionsRoot);
-	if (root.isSymbolicLink() || !root.isDirectory()) throw new Error("unsafe_root");
+	if (!root.isDirectory()) throw new Error("unsafe_root");
 	for (const dayDirectory of codexDayDirectories(sessionsRoot, walk)) {
 		try {
 			for (const file of readBoundedDirectoryNames(dayDirectory, walk, "descending")) {
@@ -713,7 +718,7 @@ function collectCodexSessions(sessionsRoot: string, monotonicNow: () => number):
 					walk.partial = true;
 					continue;
 				}
-				if (stat.isSymbolicLink() || !stat.isFile()) continue;
+				if (!stat.isFile()) continue;
 				const sessionRef = rollout[1];
 				if (sessionRef === undefined) {
 					walk.partial = true;
@@ -763,7 +768,7 @@ function codexDayDirectories(sessionsRoot: string, walk: WalkBudget): string[] {
 						walk.partial = true;
 						continue;
 					}
-					if (stat.isSymbolicLink() || !stat.isDirectory()) continue;
+					if (!stat.isDirectory()) continue;
 					next.push(child);
 				}
 			} catch {

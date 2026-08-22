@@ -36,6 +36,36 @@ import path from "node:path";
 import process from "node:process";
 import { fileURLToPath } from "node:url";
 
+// The `functions` floor in `.c8rc.scripts.json` is 91. MEASURED 2026-08-21 on
+// linux-x64: 91.46 (450/492). It was 90.24 earlier the same day, and 90.16 at
+// `f5c351f` before the Protocol tarball cutover — so the floor had been unmet for
+// a while and the cutover raised the gap rather than created it. The floor was
+// NOT moved to close it; the tree came up to meet it.
+//
+// What the gap actually was, because the percentage hid it: six `npm run lint:*`
+// FRONT DOORS had no coverage at all. Each executes at import and calls
+// `process.exit`, so no test could import one and none did — and nothing here
+// would have noticed one crashing on startup, which is the worst failure a gate
+// has, since a red exit from a broken import reads like a caught regression.
+// `test/source/gate-front-doors.test.ts` now spawns each one and asserts it
+// starts, reports, and announces itself. It deliberately does not assert the
+// verdict: that would make it a second copy of the gate, and a duplicated gate
+// is not a tested gate.
+//
+// Two things to know before reading the number again. c8 counts spawned
+// subprocesses, so covering an unloaded file raises the DENOMINATOR too — `all:
+// true` had been scoring each unloaded file as one placeholder function rather
+// than its real count, which is why 435/482 became 444/491 for a gain of only
+// 0.18 points. And three of those six files contain zero functions, so they can
+// never move this ratio however well they are tested.
+//
+// Nobody noticed the floor was unmet because nothing on a feature branch runs it:
+// `check:unit` is what `.githooks/pre-push` invokes for a non-tag push and it does
+// not include `coverage:scripts`, and `check.yml` only fires on `main` and on pull
+// requests. So the floor is exercised by a PR, a tag, or a maintainer typing
+// `npm run check` — and a long-lived branch can still drift under it for as long
+// as it likes. That is unchanged, and it is the reason to re-measure rather than
+// trust this comment.
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const CONFIG = ".c8rc.scripts.json";
 const TIERS = "test:tiers";

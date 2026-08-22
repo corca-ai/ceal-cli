@@ -1,3 +1,4 @@
+import "../../../test/require-source-lane.ts";
 import { required as requiredValue } from "../../../test/required.ts";
 import { CealHpkeError, generateCealHpkeKeyPair, openCealHpkeMessage, sealCealHpkeMessage } from "../dist/hpke.js";
 import assert from "node:assert/strict";

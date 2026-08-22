@@ -192,8 +192,11 @@ export function resolveWorkerReleaseGuideInput(options: PathInputOptions = {}): 
 
 // Re-raised as this module's error type so a caller catching WorkerReleaseInputError
 // sees the refusal rather than an unrelated exception escaping the release lane.
-// The code is carried through unchanged: `proof_shipment_protocol_divergence` is
-// the stable name the Gateway owner decision asked for.
+// The code is carried through unchanged, whatever it is. It used to be worth
+// naming `proof_shipment_protocol_divergence` here; that code cannot be raised
+// any more, because proof and shipment are now the same archive. The current set
+// is `invalid_gateway_handoff_lock`, `vendored_artifact_missing`,
+// `vendored_artifact_mismatch` and `vendored_artifact_untracked`.
 function assertShippableProtocolVendorPinFor(repoRoot: string): void {
 	try {
 		assertShippableProtocolVendorPin({ repoRoot });
@@ -803,6 +806,12 @@ function validateProtocolArtifact({
 	) {
 		fail("protocol_artifact_mismatch", "Gateway Protocol tarball does not expose the declared package surface.");
 	}
+	// The DECLARED dependency is still the published version, deliberately. Making
+	// the owned manifests say `file:../../vendor/...` would have put a path only this
+	// checkout can resolve into a package that is published and consumed elsewhere --
+	// root `ceal` consumes the client as a tarball and supplies its own Protocol. The
+	// redirection to the vendored archive belongs to this repository's install, and
+	// lives in the root `overrides`, where the lockfile `integrity` binds the bytes.
 	for (const sourcePath of [inventory.client.source_path, inventory.worker.source_path]) {
 		const manifest = readJson(path.join(repoRoot, sourcePath, "package.json"), "invalid_inventory");
 		if (!isJsonRecord(manifest) || !isJsonRecord(manifest.dependencies) || manifest.dependencies[requirement.package] !== artifact.version) {
@@ -849,7 +858,13 @@ function requireRegularAbsoluteFile(value: unknown, code: string): string {
 function requireRegularFile(filePath: string, code: string): string {
 	if (!existsSync(filePath)) fail(code, "Worker release input is missing.");
 	const stat = lstatSync(filePath);
-	if (!stat.isFile() || stat.isSymbolicLink()) fail(code, "Worker release input must be a regular non-symlink file.");
+	// `lstatSync` does not follow the link, so a symlink already fails the check
+	// below and a second `|| stat.isSymbolicLink()` operand could never evaluate
+	// true -- the same reasoning `verify-protocol-vendor-pin.ts` wrote down when it
+	// removed its own. Measured rather than argued: dropping the operand kept the
+	// suite green, while dropping the surviving one turned
+	// the sibling guard in `verify-gateway-protocol-consumer.ts` red.
+	if (!stat.isFile()) fail(code, "Worker release input must be a regular non-symlink file.");
 	return filePath;
 }
 

@@ -11,6 +11,29 @@ export { sha256 };
 export const REPO_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const TSC = resolvePackageBin(join(REPO_ROOT, "node_modules", "@typescript", "native"));
 
+/**
+ * Unpack the vendored Protocol archive into the artifact workspace instead of
+ * compiling it.
+ *
+ * `compile` exists to prove that a package builds from ITS OWN source under a
+ * clean program. That question does not apply to the Protocol any more: this
+ * repository has no Protocol source, and the archive already carries the `dist`
+ * a consumer resolves. Compiling a copy would prove something about a local
+ * recompilation rather than about the bytes a release consumes.
+ */
+function unpackVendoredProtocol(artifactRoot: string): string {
+	const lock = JSON.parse(readFileSync(join(REPO_ROOT, "gateway-protocol-handoff-lock.json"), "utf8"));
+	const packageRoot = join(artifactRoot, "output", "packages", "ceal-protocol");
+	mkdirSync(packageRoot, { recursive: true });
+	const extracted = spawnSync(
+		"tar",
+		["-xzf", join(REPO_ROOT, "vendor", "ceal-protocol", lock.protocol.filename), "-C", packageRoot, "--strip-components=1"],
+		{ encoding: "utf8" },
+	);
+	if (extracted.status !== 0) throw new Error(`vendored protocol archive could not be unpacked: ${extracted.stderr}`);
+	return packageRoot;
+}
+
 function compile(packageName: string, artifactRoot: string, paths?: Record<string, string[]>): string {
 	const checkoutRoot = join(REPO_ROOT, "packages", packageName);
 	const sourceRoot = join(artifactRoot, "input", "packages", packageName);
@@ -78,7 +101,7 @@ export function buildIsolatedWorkspaceArtifacts({ includeWorker = false }: { inc
 		symlinkSync(join(REPO_ROOT, "node_modules", "yaml"), join(dependencies, "yaml"), "dir");
 		mkdirSync(join(root, "input", "node_modules"), { recursive: true });
 		symlinkSync(join(REPO_ROOT, "node_modules", "yaml"), join(root, "input", "node_modules", "yaml"), "dir");
-		const protocol = compile("ceal-protocol", root);
+		const protocol = unpackVendoredProtocol(root);
 		const client = compile("ceal-client", root, {
 			"@corca-ai/ceal-protocol": [join(protocol, "dist", "index.d.ts")],
 		});
